@@ -1,0 +1,13 @@
+# Browser automation
+browser-use>=0.1.0
+playwright>=1.40.0
+
+# LLM providers
+langchain-anthropic>=0.1.0
+
+# PDF generation
+fpdf2>=2.7.0
+
+# Utilities
+python-dotenv>=1.0.0
+PyYAML>=6.0

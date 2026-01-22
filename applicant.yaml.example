@@ -1,0 +1,62 @@
+# Applicant configuration
+# Copy this file to applicant.yaml and fill in your information
+
+# Personal information
+name: "Your Name"
+email: "your.email@example.com"
+phone: "+1 (555) 123-4567"
+location: "City, State"
+linkedin: "https://www.linkedin.com/in/yourprofile"
+
+# Resume
+resume_path: "/path/to/your/resume.pdf"
+resume_text: |
+  Your Name
+  your.email@example.com | +1 (555) 123-4567 | LinkedIn | City, State
+  
+  Work History
+  
+  Company Name
+  Role Title (Start Date - End Date)
+  - Achievement 1
+  - Achievement 2
+  
+  Education
+  University Name | Degree
+
+# Job preferences
+target_roles:
+  - "Senior Product Manager"
+  - "Staff Product Manager"
+  - "Principal Product Manager"
+salary_minimum: 150000
+location_preference: "hybrid, remote"  # Options: remote, hybrid, onsite
+industries:
+  - "Technology"
+  - "Software"
+
+# Work authorization (US)
+authorized_to_work_us: true
+requires_sponsorship: false
+
+# Exclusions
+exclude_companies:
+  - "Current Employer"
+exclude_platforms:
+  - "Workday"
+  - "Easy Apply"
+
+# Professional background (used for answering custom application questions)
+background_summary: |
+  Brief summary of your professional background, key skills, and experience.
+  This is used to answer custom questions on job applications.
+
+key_achievements:
+  - "Achievement 1 with metrics"
+  - "Achievement 2 with metrics"
+  - "Achievement 3 with metrics"
+
+# LLM provider for browser-applicator (file upload jobs)
+# Options: openrouter, anthropic, openai, google
+llm_provider: "openrouter"
+llm_model: "google/gemini-2.0-flash-001"

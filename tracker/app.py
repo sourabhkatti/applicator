@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""
+Flask server for the job tracker.
+
+Serves the static tracker UI and provides API endpoints for configuration.
+"""
+
+import json
+import webbrowser
+from pathlib import Path
+
+import yaml
+from flask import Flask, jsonify, request, send_from_directory
+
+app = Flask(__name__, static_folder='.')
+
+# Paths
+TRACKER_DIR = Path(__file__).parent
+ROOT_DIR = TRACKER_DIR.parent
+CONFIG_PATH = ROOT_DIR / "applicant.yaml"
+JOBS_PATH = TRACKER_DIR / "jobs.json"
+
+
+@app.route('/')
+def index():
+    """Serve the main tracker page."""
+    return send_from_directory(TRACKER_DIR, 'index.html')
+
+
+@app.route('/jobs.json')
+def jobs():
+    """Serve the jobs data."""
+    return send_from_directory(TRACKER_DIR, 'jobs.json')
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Get the applicant configuration."""
+    if not CONFIG_PATH.exists():
+        return jsonify({"error": "Configuration not found", "setup_required": True}), 404
+
+    with open(CONFIG_PATH) as f:
+        config = yaml.safe_load(f)
+
+    # Return only non-sensitive fields for the UI
+    return jsonify({
+        "setup_required": False,
+        "name": config.get("name", ""),
+        "target_roles": config.get("target_roles", []),
+        "location_preference": config.get("location_preference", ""),
+        "industries": config.get("industries", []),
+    })
+
+
+@app.route('/api/config', methods=['POST'])
+def save_config():
+    """Save the applicant configuration."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    # If config exists, merge with existing
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH) as f:
+            existing = yaml.safe_load(f) or {}
+        existing.update(data)
+        data = existing
+
+    with open(CONFIG_PATH, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    return jsonify({"success": True})
+
+
+@app.route('/api/jobs', methods=['GET'])
+def get_jobs():
+    """Get all jobs."""
+    if not JOBS_PATH.exists():
+        return jsonify({"jobs": []})
+
+    with open(JOBS_PATH) as f:
+        data = json.load(f)
+
+    return jsonify(data)
+
+
+@app.route('/api/jobs', methods=['POST'])
+def save_jobs():
+    """Save jobs data."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    with open(JOBS_PATH, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    return jsonify({"success": True})
+
+
+def main():
+    """Run the server and open the browser."""
+    port = 8080
+    url = f"http://localhost:{port}"
+
+    print(f"Starting Job Tracker at {url}")
+    print("Press Ctrl+C to stop")
+
+    # Open browser after a short delay
+    import threading
+    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    # Run Flask (disable reloader to prevent double browser open)
+    app.run(host='localhost', port=port, debug=False)
+
+
+if __name__ == '__main__':
+    main()

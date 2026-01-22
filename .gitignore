@@ -1,0 +1,53 @@
+# Personal configuration (contains PII)
+applicant.yaml
+
+# Job tracker data (contains application history)
+tracker/jobs.json
+
+# Generated files
+auto-applicator/resume_optimized.txt
+browser-applicator/output/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code local settings
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Environment
+.env
+.env.local
+*.env
+
+# Logs
+*.log
+
+# PDFs (may contain resumes)
+*.pdf
+
+# Temporary files
+*.tmp
+*.temp
