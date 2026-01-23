@@ -353,15 +353,30 @@ Upload this file for the resume: {prepared_resume}
 
 12. **Submit**: Click the Submit Application button
 
-13. **If Submit Fails**:
+13. **CRITICAL - Verify Submission (DO NOT SKIP)**:
+    - After clicking Submit, WAIT 5 seconds for the page to update
+    - Then carefully READ the page content to determine if submission succeeded
+    - **SUCCESS indicators** (must see at least one):
+      - "Thank you" or "Thanks for applying" message
+      - "Application received" or "Application submitted" confirmation
+      - A completely new page/screen replacing the form
+      - "We'll be in touch" or "We will review" message
+      - The form disappearing and being replaced by a confirmation message
+    - **FAILURE indicators** (if you see any of these, submission FAILED):
+      - The form is still visible with the same fields
+      - Red error text or validation messages anywhere on the page
+      - "Required" warnings next to unfilled fields
+      - "Please fill out this field" browser tooltips
+      - The page looks exactly the same as before clicking Submit
+      - A banner or toast saying "Please complete required fields"
+    - If you see FAILURE indicators, scroll up to find errors, fix them, and try submitting again
+    - After 3 failed submit attempts, report exactly what errors you see and stop
+
+14. **If Submit Fails**:
     - Read any error messages carefully
     - Scroll up to find missed required fields
     - Fill any missing fields and try again
     - After 3 failed attempts, report what's missing and stop
-
-14. **Confirmation**:
-    - Wait for the confirmation/thank you page to load
-    - Extract the job role/title if visible
 
 ## Important Notes
 - REQUIRED FIELDS: Look for asterisks (*) or "required" text - these MUST be filled
@@ -369,11 +384,12 @@ Upload this file for the resume: {prepared_resume}
 - If a field has options, choose the most appropriate one
 - If submission fails repeatedly, check for validation errors at the top of the form
 
-## Output
+## Output (MUST include all of the following)
 When complete, provide:
-- Whether the application was successfully submitted
+- SUCCESS or FAILURE (based on what you SAW on the page after submit, not what you think happened)
+- What confirmation message you saw (quote the exact text if possible)
+- If FAILURE: what error messages or issues you observed
 - The job role/title
-- Any error messages encountered
 """
 
     # Initialize browser and agent
@@ -415,8 +431,21 @@ When complete, provide:
 
         if result:
             result_lower = result.lower()
-            if any(word in result_lower for word in ['success', 'submitted', 'thank you', 'confirmation', 'received']):
+            # Require explicit confirmation signals - the agent must have seen a confirmation page
+            confirmation_signals = ['thank you', 'thanks for applying', 'application received',
+                                    'application submitted', 'we will review', "we'll be in touch",
+                                    'successfully submitted', 'has been submitted']
+            failure_signals = ['not found', 'job not found', 'unable to submit', 'could not',
+                              'failed', 'error', 'captcha', 'without the resume',
+                              'missing required', 'validation']
+
+            has_confirmation = any(signal in result_lower for signal in confirmation_signals)
+            has_failure = any(signal in result_lower for signal in failure_signals)
+
+            # Only count as success if we see confirmation AND no failure signals
+            if has_confirmation and not has_failure:
                 success = True
+
             # Try to extract role
             role_match = re.search(r'(product manager|pm|engineer|designer|analyst|director)[^,\n]*', result_lower, re.IGNORECASE)
             if role_match:
