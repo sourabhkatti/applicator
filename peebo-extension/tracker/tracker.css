@@ -288,6 +288,10 @@ html, body {
   animation: fade-in var(--duration-fast);
 }
 
+.modal-overlay.hidden {
+  display: none !important;
+}
+
 #delete-modal-overlay {
   z-index: 1001;
 }
