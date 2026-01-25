@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Peebo - Application Tracker</title>
+  <link rel="stylesheet" href="../assets/design-system.css">
+  <link rel="stylesheet" href="tracker.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="tracker-container">
+    <!-- Header -->
+    <header class="tracker-header">
+      <div class="header-left">
+        <img src="../assets/mascot/peebo-idle.svg" alt="Peebo" class="mascot">
+        <h1>My applications</h1>
+      </div>
+      <div class="header-right">
+        <div class="search-wrapper">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="5"/>
+            <path d="M12 12l4 4"/>
+          </svg>
+          <input type="text" class="input search-input" id="search-input" placeholder="Search applications...">
+        </div>
+        <button class="btn btn-primary" id="add-btn">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 3v12M3 9h12"/>
+          </svg>
+          Add
+        </button>
+        <button class="btn btn-icon btn-ghost" id="settings-btn" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="10" cy="10" r="3"/>
+            <path d="M10 1v2m0 14v2M1 10h2m14 0h2M3.5 3.5l1.5 1.5m10 10l1.5 1.5M3.5 16.5l1.5-1.5m10-10l1.5-1.5"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-value" id="stat-total">0</span>
+        <span class="stat-label">Total</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-applied" id="stat-applied">0</span>
+        <span class="stat-label">Applied</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-interviewing" id="stat-interviewing">0</span>
+        <span class="stat-label">Interviewing</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-offer" id="stat-offer">0</span>
+        <span class="stat-label">Offers</span>
+      </div>
+    </div>
+
+    <!-- Kanban Board -->
+    <main class="kanban-board" id="kanban-board">
+      <!-- Applied Column -->
+      <div class="kanban-column" data-status="applied">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot applied"></span>
+            <h2>Applied</h2>
+            <span class="column-count" id="count-applied">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-applied" data-status="applied">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+
+      <!-- Interviewing Column -->
+      <div class="kanban-column" data-status="interviewing">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot interviewing"></span>
+            <h2>Interviewing</h2>
+            <span class="column-count" id="count-interviewing">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-interviewing" data-status="interviewing">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+
+      <!-- Rejected Column -->
+      <div class="kanban-column" data-status="rejected">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot rejected"></span>
+            <h2>Rejected</h2>
+            <span class="column-count" id="count-rejected">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-rejected" data-status="rejected">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+
+      <!-- Offer Column -->
+      <div class="kanban-column" data-status="offer">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot offer"></span>
+            <h2>Offer</h2>
+            <span class="column-count" id="count-offer">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-offer" data-status="offer">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+    </main>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal-overlay hidden" id="modal-overlay">
+      <div class="modal" id="application-modal">
+        <div class="modal-header">
+          <h2 id="modal-title">Add application</h2>
+          <button class="btn btn-icon btn-ghost" id="modal-close">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 5l10 10M15 5l-10 10"/>
+            </svg>
+          </button>
+        </div>
+        <form id="application-form">
+          <input type="hidden" id="app-id">
+
+          <div class="form-group">
+            <label class="form-label" for="app-company">Company *</label>
+            <input type="text" class="input" id="app-company" required placeholder="e.g., Acme Corp">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="app-role">Role *</label>
+            <input type="text" class="input" id="app-role" required placeholder="e.g., Software Engineer">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="app-url">Job URL</label>
+            <input type="url" class="input" id="app-url" placeholder="https://...">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="app-status">Status</label>
+              <select class="input" id="app-status">
+                <option value="applied">Applied</option>
+                <option value="interviewing">Interviewing</option>
+                <option value="rejected">Rejected</option>
+                <option value="offer">Offer</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="app-salary">Salary range</label>
+              <input type="text" class="input" id="app-salary" placeholder="e.g., $120k-$150k">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="app-notes">Notes</label>
+            <textarea class="input" id="app-notes" rows="3" placeholder="Any notes about this application..."></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="modal-save">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay hidden" id="delete-modal-overlay">
+      <div class="modal modal-sm">
+        <div class="modal-header">
+          <h2>Delete application?</h2>
+        </div>
+        <p class="text-secondary mb-4">This action cannot be undone.</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="delete-cancel">Cancel</button>
+          <button class="btn btn-primary" style="background-color: var(--color-error);" id="delete-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state hidden" id="empty-state">
+      <img src="../assets/mascot/peebo-idle.svg" alt="Peebo" class="empty-mascot">
+      <h2>No applications yet</h2>
+      <p class="text-secondary">Start applying to jobs and track them here.</p>
+      <button class="btn btn-primary" id="empty-add-btn">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 3v12M3 9h12"/>
+        </svg>
+        Add your first application
+      </button>
+    </div>
+  </div>
+
+  <script src="tracker.js" type="module"></script>
+</body>
+</html>

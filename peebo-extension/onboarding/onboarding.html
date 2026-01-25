@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Peebo - Setup</title>
+  <link rel="stylesheet" href="../assets/design-system.css">
+  <link rel="stylesheet" href="onboarding.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="onboarding-container">
+    <!-- Progress Steps -->
+    <div class="progress-steps" id="progress-steps">
+      <div class="step active" data-step="1">
+        <span class="step-number">1</span>
+        <span class="step-label">Welcome</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="2">
+        <span class="step-number">2</span>
+        <span class="step-label">Resume</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="3">
+        <span class="step-number">3</span>
+        <span class="step-label">Details</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="4">
+        <span class="step-number">4</span>
+        <span class="step-label">Preferences</span>
+      </div>
+    </div>
+
+    <!-- Step 1: Welcome -->
+    <section class="step-content" id="step-1">
+      <div class="step-hero">
+        <img src="../assets/mascot/peebo-idle.svg" alt="Peebo" class="hero-mascot">
+        <h1>Hi! I'm Peebo</h1>
+        <p class="text-lg text-secondary">
+          I'll help you apply to jobs automatically with ATS-optimized resumes.
+          Let's get you set up!
+        </p>
+      </div>
+      <button class="btn btn-primary btn-lg" id="start-btn">
+        Get started
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 10h12M12 4l6 6-6 6"/>
+        </svg>
+      </button>
+    </section>
+
+    <!-- Step 2: Resume -->
+    <section class="step-content hidden" id="step-2">
+      <div class="step-header">
+        <h2>Upload your resume</h2>
+        <p class="text-secondary">I'll use this to fill out applications and tailor it for each job.</p>
+      </div>
+
+      <div class="upload-zone" id="upload-zone">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="var(--text-tertiary)" stroke-width="1.5">
+          <rect x="8" y="4" width="32" height="40" rx="2"/>
+          <path d="M16 16h16M16 24h16M16 32h10"/>
+          <circle cx="36" cy="36" r="8" fill="var(--color-primary)" stroke="var(--color-primary)"/>
+          <path d="M36 32v8M32 36h8" stroke="white" stroke-width="2"/>
+        </svg>
+        <p class="upload-text">Drop your resume PDF here</p>
+        <p class="upload-hint">or click to browse</p>
+        <input type="file" id="resume-file" accept=".pdf,.doc,.docx,.txt" hidden>
+      </div>
+
+      <div class="divider">
+        <span>or</span>
+      </div>
+
+      <div class="alternate-options">
+        <button class="btn btn-secondary" id="linkedin-import-btn">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M17 2H3a1 1 0 00-1 1v14a1 1 0 001 1h14a1 1 0 001-1V3a1 1 0 00-1-1zM6 7.5h.01M6 9v5M9 14V9.5l2 2m0-2.5v5M15 14v-3a1.5 1.5 0 00-3 0"/>
+          </svg>
+          Import from LinkedIn
+        </button>
+        <button class="btn btn-secondary" id="paste-resume-btn">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="5" y="3" width="10" height="14" rx="1"/>
+            <path d="M8 7h4M8 10h4M8 13h2"/>
+          </svg>
+          Paste resume text
+        </button>
+      </div>
+
+      <!-- Resume text modal -->
+      <div class="inline-modal hidden" id="resume-text-modal">
+        <textarea class="input" id="resume-textarea" rows="10" placeholder="Paste your resume text here..."></textarea>
+        <div class="inline-modal-actions">
+          <button class="btn btn-secondary" id="cancel-paste">Cancel</button>
+          <button class="btn btn-primary" id="save-paste">Save</button>
+        </div>
+      </div>
+
+      <!-- Resume preview -->
+      <div class="resume-preview hidden" id="resume-preview">
+        <div class="preview-header">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="8 12 11 15 16 9"/>
+          </svg>
+          <span class="preview-filename" id="preview-filename">resume.pdf</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="remove-resume">Remove</button>
+      </div>
+
+      <div class="step-actions">
+        <button class="btn btn-ghost" id="back-2">Back</button>
+        <button class="btn btn-primary" id="next-2" disabled>Continue</button>
+      </div>
+    </section>
+
+    <!-- Step 3: Personal Details -->
+    <section class="step-content hidden" id="step-3">
+      <div class="step-header">
+        <h2>Confirm your details</h2>
+        <p class="text-secondary">I extracted this from your resume. Make any corrections needed.</p>
+      </div>
+
+      <form id="details-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="full-name">Full name *</label>
+            <input type="text" class="input" id="full-name" required placeholder="John Doe">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="email">Email *</label>
+            <input type="email" class="input" id="email" required placeholder="john@example.com">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="phone">Phone</label>
+            <input type="tel" class="input" id="phone" placeholder="+1 (555) 123-4567">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="location">Location</label>
+            <input type="text" class="input" id="location" placeholder="San Francisco, CA">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="linkedin">LinkedIn profile</label>
+          <input type="url" class="input" id="linkedin" placeholder="https://linkedin.com/in/johndoe">
+        </div>
+      </form>
+
+      <div class="step-actions">
+        <button class="btn btn-ghost" id="back-3">Back</button>
+        <button class="btn btn-primary" id="next-3">Continue</button>
+      </div>
+    </section>
+
+    <!-- Step 4: Preferences -->
+    <section class="step-content hidden" id="step-4">
+      <div class="step-header">
+        <h2>Job preferences</h2>
+        <p class="text-secondary">Help me find the right jobs for you.</p>
+      </div>
+
+      <form id="preferences-form">
+        <div class="form-group">
+          <label class="form-label" for="target-roles">Target roles *</label>
+          <input type="text" class="input" id="target-roles" required placeholder="Software Engineer, Full Stack Developer">
+          <p class="form-hint">Comma-separated list of roles you're looking for</p>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="salary-min">Minimum base salary</label>
+            <input type="text" class="input" id="salary-min" placeholder="$120,000">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="location-pref">Location preference</label>
+            <select class="input" id="location-pref">
+              <option value="any">Any</option>
+              <option value="remote">Remote only</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="onsite">Onsite</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="industries">Industries</label>
+          <input type="text" class="input" id="industries" placeholder="Tech, Finance, Healthcare">
+          <p class="form-hint">Comma-separated list (optional)</p>
+        </div>
+
+        <div class="form-row checkbox-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="authorized-work" checked>
+            <span>Authorized to work in the US</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="requires-sponsorship">
+            <span>Requires visa sponsorship</span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="exclude-companies">Companies to exclude</label>
+          <input type="text" class="input" id="exclude-companies" placeholder="Former employers, competitors...">
+          <p class="form-hint">Comma-separated list (optional)</p>
+        </div>
+      </form>
+
+      <div class="step-actions">
+        <button class="btn btn-ghost" id="back-4">Back</button>
+        <button class="btn btn-primary" id="finish-btn">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 10 8 14 16 6"/>
+          </svg>
+          Finish setup
+        </button>
+      </div>
+    </section>
+
+    <!-- Step 5: Complete -->
+    <section class="step-content hidden" id="step-complete">
+      <div class="step-hero">
+        <img src="../assets/mascot/peebo-success.svg" alt="Peebo" class="hero-mascot success-animation">
+        <h1>You're all set!</h1>
+        <p class="text-lg text-secondary">
+          Start applying to jobs from the extension popup or add jobs to track.
+        </p>
+      </div>
+      <div class="complete-actions">
+        <button class="btn btn-primary btn-lg" id="start-applying-btn">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 2l6 4-6 4-6-4 6-4z"/>
+            <path d="M4 10l6 4 6-4"/>
+            <path d="M4 14l6 4 6-4"/>
+          </svg>
+          Start applying
+        </button>
+        <button class="btn btn-secondary" id="view-tracker-btn">
+          View tracker
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <script src="onboarding.js" type="module"></script>
+</body>
+</html>

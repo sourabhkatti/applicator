@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "Peebo - Job Application Automation",
+  "version": "1.0.0",
+  "description": "Autonomous job applications with ATS-optimized resumes and application tracking",
+  "icons": {
+    "16": "assets/mascot/peebo-icon-16.png",
+    "32": "assets/mascot/peebo-icon-32.png",
+    "48": "assets/mascot/peebo-icon-48.png",
+    "128": "assets/mascot/peebo-icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/mascot/peebo-icon-16.png",
+      "32": "assets/mascot/peebo-icon-32.png",
+      "48": "assets/mascot/peebo-icon-48.png"
+    },
+    "default_title": "Peebo"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.greenhouse.io/*",
+        "*://*.lever.co/*",
+        "*://*.ashbyhq.com/*",
+        "*://*.workday.com/*",
+        "*://*.myworkdayjobs.com/*",
+        "*://*.icims.com/*",
+        "*://*.jobvite.com/*",
+        "*://*.smartrecruiters.com/*",
+        "*://*.linkedin.com/jobs/*"
+      ],
+      "js": ["content/job-detector.js"],
+      "css": ["content/job-detector.css"]
+    }
+  ],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "notifications",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://*.supabase.co/*",
+    "https://api.browser-use.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*", "onboarding/*", "tracker/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "oauth2": {
+    "client_id": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["openid", "email", "profile"]
+  }
+}

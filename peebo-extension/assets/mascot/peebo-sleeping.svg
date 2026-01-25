@@ -1,0 +1,52 @@
+<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Body (slightly slouched) -->
+  <ellipse cx="60" cy="75" rx="40" ry="32" fill="#FFD93D"/>
+  <ellipse cx="60" cy="75" rx="40" ry="32" fill="url(#bodyGradient)"/>
+
+  <!-- Belly -->
+  <ellipse cx="60" cy="82" rx="28" ry="20" fill="#FFF3C4"/>
+
+  <!-- Left Wing (resting) -->
+  <ellipse cx="28" cy="78" rx="12" ry="16" fill="#FFCC00" transform="rotate(15 28 78)"/>
+
+  <!-- Right Wing (resting) -->
+  <ellipse cx="92" cy="78" rx="12" ry="16" fill="#FFCC00" transform="rotate(-15 92 78)"/>
+
+  <!-- Head feather tuft (relaxed) -->
+  <path d="M55 48 Q60 42 65 50" stroke="#FFCC00" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M52 52 Q56 48 60 54" stroke="#FFCC00" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- Left Eye (closed sleeping) -->
+  <path d="M40 62 Q47 58 54 62" stroke="#3D3428" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Right Eye (closed sleeping) -->
+  <path d="M66 62 Q73 58 80 62" stroke="#3D3428" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Peaceful smile -->
+  <path d="M55 72 L60 78 L65 72 Z" fill="#FF8A65"/>
+  <path d="M54 76 Q60 80 66 76" stroke="#3D3428" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Feet -->
+  <path d="M48 105 L45 111 M48 105 L48 113 M48 105 L51 111" stroke="#FF8A65" stroke-width="3" stroke-linecap="round"/>
+  <path d="M72 105 L69 111 M72 105 L72 113 M72 105 L75 111" stroke="#FF8A65" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Blush (soft) -->
+  <ellipse cx="35" cy="70" rx="5" ry="3" fill="#FFB74D" opacity="0.4"/>
+  <ellipse cx="85" cy="70" rx="5" ry="3" fill="#FFB74D" opacity="0.4"/>
+
+  <!-- ZZZ -->
+  <text x="85" y="35" font-family="Nunito, sans-serif" font-size="14" font-weight="bold" fill="#6B5B4F">Z</text>
+  <text x="92" y="28" font-family="Nunito, sans-serif" font-size="12" font-weight="bold" fill="#6B5B4F" opacity="0.7">Z</text>
+  <text x="98" y="22" font-family="Nunito, sans-serif" font-size="10" font-weight="bold" fill="#6B5B4F" opacity="0.5">Z</text>
+
+  <!-- Moon/stars background accent -->
+  <circle cx="100" cy="15" r="8" fill="#FFF3C4"/>
+  <circle cx="96" cy="13" r="8" fill="#FFF8E7"/>
+
+  <defs>
+    <radialGradient id="bodyGradient" cx="0.5" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#FFE082"/>
+      <stop offset="100%" stop-color="#FFD93D"/>
+    </radialGradient>
+  </defs>
+</svg>
