@@ -95,7 +95,7 @@ Instructions:
     const response = await fetch(`${BROWSER_USE_API_URL}/tasks`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${BROWSER_USE_API_KEY}`,
+        'X-Browser-Use-API-Key': BROWSER_USE_API_KEY,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(taskPayload)
@@ -139,7 +139,7 @@ async function pollBrowserUseTask(taskId) {
     // Check task status from browser-use API
     const response = await fetch(`${BROWSER_USE_API_URL}/tasks/${task.browserUseTaskId}`, {
       headers: {
-        'Authorization': `Bearer ${BROWSER_USE_API_KEY}`
+        'X-Browser-Use-API-Key': BROWSER_USE_API_KEY
       }
     });
 
@@ -257,7 +257,7 @@ async function cancelApplication() {
         await fetch(`${BROWSER_USE_API_URL}/tasks/${task.browserUseTaskId}/cancel`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${BROWSER_USE_API_KEY}`
+            'X-Browser-Use-API-Key': BROWSER_USE_API_KEY
           }
         });
       } catch (e) {
