@@ -1,6 +1,10 @@
 // Peebo Background Service Worker
-// Handles local application tracking
-// No authentication required - works offline with local storage
+// Handles application tracking with browser-use Cloud automation
+
+// Configuration
+const BROWSER_USE_API_KEY = 'bu_fkMsZKn_HzIRkjT5gcGCPxhvrDvySfHgA402fEfNavc';
+const BROWSER_USE_API_URL = 'https://api.browser-use.com/v1';
+const POLL_INTERVAL = 3000; // 3 seconds
 
 // State
 const activeTasks = new Map();
@@ -54,58 +58,166 @@ async function handleMessage(message, sender) {
   }
 }
 
-// Start a job application (simulated for now - adds to tracker)
+// Start a job application via browser-use Cloud
 async function startApplication(jobUrl) {
-  const taskId = generateId();
+  try {
+    const company = extractCompanyFromUrl(jobUrl);
 
-  // Extract info from URL
-  const company = extractCompanyFromUrl(jobUrl);
+    // Get applicant info from storage
+    const applicantData = await getApplicantInfo();
 
-  // Track this task
-  activeTasks.set(taskId, {
-    jobUrl,
-    company,
-    startedAt: Date.now(),
-    status: 'running',
-    progress: 0
-  });
+    // Create browser-use task
+    const taskPayload = {
+      url: jobUrl,
+      task: `Apply to this job posting. Fill out the application form with my information and submit it.
 
-  // Simulate application progress
-  simulateProgress(taskId);
+My Information:
+- Name: ${applicantData.name || 'Not provided'}
+- Email: ${applicantData.email || 'Not provided'}
+- Phone: ${applicantData.phone || 'Not provided'}
+- Location: ${applicantData.location || 'Not provided'}
+- LinkedIn: ${applicantData.linkedinUrl || 'Not provided'}
 
-  return { success: true, taskId };
+Resume:
+${applicantData.resumeText || 'Not provided - please fill in manually if required'}
+
+Instructions:
+1. Navigate to the job application page
+2. Fill out all required fields with the information above
+3. Upload resume if file upload is available (use resume text otherwise)
+4. Submit the application
+5. Confirm the application was submitted successfully`,
+      max_steps: 50,
+      use_vision: true
+    };
+
+    // Call browser-use API
+    const response = await fetch(`${BROWSER_USE_API_URL}/agent/run`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${BROWSER_USE_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(taskPayload)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`browser-use API error: ${error}`);
+    }
+
+    const result = await response.json();
+    const taskId = result.id || result.task_id || generateId();
+
+    // Track this task
+    activeTasks.set(taskId, {
+      jobUrl,
+      company,
+      startedAt: Date.now(),
+      status: 'running',
+      progress: 10,
+      browserUseTaskId: result.id
+    });
+
+    // Start polling for progress
+    pollBrowserUseTask(taskId);
+
+    return { success: true, taskId };
+
+  } catch (error) {
+    console.error('Failed to start application:', error);
+    return { success: false, error: error.message };
+  }
 }
 
-// Simulate progress (for demo purposes)
-async function simulateProgress(taskId) {
+// Poll browser-use task for progress
+async function pollBrowserUseTask(taskId) {
   const task = activeTasks.get(taskId);
-  if (!task) return;
+  if (!task || task.status !== 'running') return;
 
-  const stages = [20, 40, 60, 80, 100];
-  let stageIndex = 0;
+  try {
+    // Check task status from browser-use API
+    const response = await fetch(`${BROWSER_USE_API_URL}/agent/status/${task.browserUseTaskId}`, {
+      headers: {
+        'Authorization': `Bearer ${BROWSER_USE_API_KEY}`
+      }
+    });
 
-  const interval = setInterval(async () => {
-    if (stageIndex >= stages.length) {
-      clearInterval(interval);
+    if (!response.ok) {
+      console.error('Failed to get task status');
+      setTimeout(() => pollBrowserUseTask(taskId), POLL_INTERVAL);
+      return;
+    }
+
+    const status = await response.json();
+
+    // Update progress based on status
+    if (status.state === 'completed' || status.state === 'success') {
       task.status = 'completed';
       task.progress = 100;
 
       // Add to applications
-      await addApplicationFromTask(task);
+      await addApplicationFromTask(task, status);
 
       // Show notification
       chrome.notifications.create({
         type: 'basic',
         iconUrl: chrome.runtime.getURL('assets/mascot/peebo-icon-128.png'),
-        title: 'Application tracked!',
-        message: `Added ${task.company} to your tracker`
+        title: 'Application submitted!',
+        message: `Successfully applied to ${task.company}`
       });
-      return;
+
+    } else if (status.state === 'failed' || status.state === 'error') {
+      task.status = 'failed';
+      task.error = status.error || 'Application failed';
+      task.progress = 0;
+
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('assets/mascot/peebo-icon-128.png'),
+        title: 'Application failed',
+        message: `Failed to apply to ${task.company}`
+      });
+
+    } else {
+      // Still running - update progress estimate
+      task.progress = Math.min(90, task.progress + 5);
+
+      // Continue polling
+      setTimeout(() => pollBrowserUseTask(taskId), POLL_INTERVAL);
     }
 
-    task.progress = stages[stageIndex];
-    stageIndex++;
-  }, 500);
+  } catch (error) {
+    console.error('Progress poll error:', error);
+    // Continue polling despite errors
+    setTimeout(() => pollBrowserUseTask(taskId), POLL_INTERVAL);
+  }
+}
+
+// Get applicant info from storage or return defaults
+async function getApplicantInfo() {
+  const result = await chrome.storage.local.get(['peeboUser']);
+  const user = result.peeboUser;
+
+  if (!user) {
+    return {
+      name: 'Your Name',
+      email: 'your.email@example.com',
+      phone: '(555) 123-4567',
+      location: 'San Francisco, CA',
+      linkedinUrl: '',
+      resumeText: ''
+    };
+  }
+
+  return {
+    name: user.full_name || 'Your Name',
+    email: user.email || 'your.email@example.com',
+    phone: user.phone || '(555) 123-4567',
+    location: user.location || 'San Francisco, CA',
+    linkedinUrl: user.linkedin_url || '',
+    resumeText: user.resume_text || ''
+  };
 }
 
 // Check progress for a specific task
@@ -126,12 +238,12 @@ async function checkProgress(taskId) {
 
 // Get progress message based on percentage
 function getProgressMessage(progress) {
-  if (progress < 20) return 'Preparing...';
-  if (progress < 40) return 'Processing job details...';
-  if (progress < 60) return 'Adding to tracker...';
-  if (progress < 80) return 'Saving application...';
-  if (progress < 100) return 'Almost done...';
-  return 'Complete!';
+  if (progress < 20) return 'Preparing application...';
+  if (progress < 40) return 'Navigating to job page...';
+  if (progress < 60) return 'Filling out application...';
+  if (progress < 80) return 'Uploading resume...';
+  if (progress < 95) return 'Submitting application...';
+  return 'Almost done...';
 }
 
 // Cancel current application
@@ -139,6 +251,19 @@ async function cancelApplication() {
   for (const [taskId, task] of activeTasks) {
     if (task.status === 'running') {
       task.status = 'cancelled';
+
+      // Try to cancel on browser-use side (best effort)
+      try {
+        await fetch(`${BROWSER_USE_API_URL}/agent/cancel/${task.browserUseTaskId}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${BROWSER_USE_API_KEY}`
+          }
+        });
+      } catch (e) {
+        console.error('Failed to cancel browser-use task:', e);
+      }
+
       activeTasks.delete(taskId);
       return { success: true };
     }
@@ -148,13 +273,17 @@ async function cancelApplication() {
 }
 
 // Add application from completed task
-async function addApplicationFromTask(task) {
+async function addApplicationFromTask(task, result) {
   const application = {
     company: task.company,
-    role: 'Position', // Will be filled in by user
+    role: 'Position', // Extract from result if available
     job_url: task.jobUrl,
     status: 'applied',
-    applied_at: new Date().toISOString()
+    applied_at: new Date().toISOString(),
+    metadata: {
+      browser_use_task_id: task.browserUseTaskId,
+      auto_applied: true
+    }
   };
 
   await addApplication(application);
