@@ -288,6 +288,10 @@ html, body {
   animation: fade-in var(--duration-fast);
 }
 
+#delete-modal-overlay {
+  z-index: 1001;
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

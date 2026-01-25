@@ -1,20 +1,9 @@
-// Peebo Popup Logic
-
-// Supabase configuration
-const SUPABASE_URL = 'https://diplqphbqlomcvlujcxd.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY'; // Replace with actual key
+// Peebo Popup Logic - No Auth Required
 
 // State
-let currentUser = null;
-let peeboUser = null;
 let isApplying = false;
 
 // DOM Elements
-const authSection = document.getElementById('auth-section');
-const onboardingSection = document.getElementById('onboarding-section');
-const applySection = document.getElementById('apply-section');
-const signInBtn = document.getElementById('sign-in-btn');
-const completeSetupBtn = document.getElementById('complete-setup-btn');
 const jobUrlInput = document.getElementById('job-url');
 const applyBtn = document.getElementById('apply-btn');
 const applyDetectedBtn = document.getElementById('apply-detected-btn');
@@ -28,172 +17,19 @@ const cancelBtn = document.getElementById('cancel-btn');
 const trackerBtn = document.getElementById('tracker-btn');
 const historyBtn = document.getElementById('history-btn');
 const settingsBtn = document.getElementById('settings-btn');
-const upgradeBtn = document.getElementById('upgrade-btn');
-const usageText = document.getElementById('usage-text');
-const usageFill = document.getElementById('usage-fill');
 const mascot = document.getElementById('mascot');
 const toast = document.getElementById('toast');
 const toastMessage = document.getElementById('toast-message');
 const toastIcon = document.getElementById('toast-icon');
 
 // Initialize
-document.addEventListener('DOMContentLoaded', async () => {
-  await checkAuthState();
+document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
   checkCurrentTab();
 });
 
-// Check authentication state
-async function checkAuthState() {
-  try {
-    const result = await chrome.storage.local.get(['session', 'peeboUser']);
-
-    if (result.session && result.peeboUser) {
-      currentUser = result.session.user;
-      peeboUser = result.peeboUser;
-
-      if (isOnboardingComplete(peeboUser)) {
-        showSection('apply');
-        updateUsageMeter();
-      } else {
-        showSection('onboarding');
-      }
-    } else if (result.session) {
-      currentUser = result.session.user;
-      await fetchPeeboUser();
-    } else {
-      showSection('auth');
-    }
-  } catch (error) {
-    console.error('Auth check failed:', error);
-    showSection('auth');
-  }
-}
-
-// Fetch Peebo user from Supabase
-async function fetchPeeboUser() {
-  try {
-    const session = await chrome.storage.local.get('session');
-    if (!session.session?.access_token) {
-      showSection('auth');
-      return;
-    }
-
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/peebo_users?auth_user_id=eq.${currentUser.id}`, {
-      headers: {
-        'Authorization': `Bearer ${session.session.access_token}`,
-        'apikey': SUPABASE_ANON_KEY,
-      }
-    });
-
-    const users = await response.json();
-
-    if (users.length > 0) {
-      peeboUser = users[0];
-      await chrome.storage.local.set({ peeboUser });
-
-      if (isOnboardingComplete(peeboUser)) {
-        showSection('apply');
-        updateUsageMeter();
-      } else {
-        showSection('onboarding');
-      }
-    } else {
-      // Create new Peebo user
-      await createPeeboUser();
-    }
-  } catch (error) {
-    console.error('Failed to fetch Peebo user:', error);
-    showToast('Failed to load profile', 'error');
-  }
-}
-
-// Create new Peebo user
-async function createPeeboUser() {
-  try {
-    const session = await chrome.storage.local.get('session');
-
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/peebo_users`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.session.access_token}`,
-        'apikey': SUPABASE_ANON_KEY,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
-      body: JSON.stringify({
-        auth_user_id: currentUser.id,
-        email: currentUser.email,
-      })
-    });
-
-    const users = await response.json();
-    peeboUser = users[0];
-    await chrome.storage.local.set({ peeboUser });
-    showSection('onboarding');
-  } catch (error) {
-    console.error('Failed to create Peebo user:', error);
-    showToast('Failed to create profile', 'error');
-  }
-}
-
-// Check if onboarding is complete
-function isOnboardingComplete(user) {
-  return user && user.full_name && user.resume_text;
-}
-
-// Show specific section
-function showSection(section) {
-  authSection.classList.add('hidden');
-  onboardingSection.classList.add('hidden');
-  applySection.classList.add('hidden');
-
-  switch (section) {
-    case 'auth':
-      authSection.classList.remove('hidden');
-      break;
-    case 'onboarding':
-      onboardingSection.classList.remove('hidden');
-      break;
-    case 'apply':
-      applySection.classList.remove('hidden');
-      break;
-  }
-}
-
-// Update usage meter
-function updateUsageMeter() {
-  if (!peeboUser) return;
-
-  const { apps_used_this_month, monthly_app_limit, tier } = peeboUser;
-
-  if (tier === 'premium') {
-    usageText.textContent = 'Unlimited applications';
-    usageFill.style.width = '100%';
-    usageFill.classList.add('success');
-    upgradeBtn.classList.add('hidden');
-  } else {
-    const remaining = monthly_app_limit - apps_used_this_month;
-    usageText.textContent = `${apps_used_this_month} of ${monthly_app_limit} applications this month`;
-    usageFill.style.width = `${(apps_used_this_month / monthly_app_limit) * 100}%`;
-
-    if (remaining <= 1) {
-      upgradeBtn.classList.remove('hidden');
-    }
-  }
-}
-
 // Setup event listeners
 function setupEventListeners() {
-  // Sign in
-  signInBtn.addEventListener('click', handleSignIn);
-
-  // Complete setup
-  completeSetupBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('onboarding/onboarding.html') });
-    window.close();
-  });
-
   // URL input
   jobUrlInput.addEventListener('input', (e) => {
     applyBtn.disabled = !isValidJobUrl(e.target.value);
@@ -222,70 +58,8 @@ function setupEventListeners() {
   });
 
   settingsBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('onboarding/onboarding.html?tab=settings') });
+    chrome.tabs.create({ url: chrome.runtime.getURL('onboarding/onboarding.html') });
   });
-
-  // Upgrade
-  upgradeBtn.addEventListener('click', handleUpgrade);
-}
-
-// Handle sign in
-async function handleSignIn() {
-  try {
-    signInBtn.disabled = true;
-    signInBtn.innerHTML = '<div class="loading-spinner"></div> Signing in...';
-
-    // Use Chrome identity API for Google sign-in
-    const redirectUrl = chrome.identity.getRedirectURL();
-    const authUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
-
-    const responseUrl = await chrome.identity.launchWebAuthFlow({
-      url: authUrl,
-      interactive: true
-    });
-
-    // Parse the response URL for tokens
-    const url = new URL(responseUrl);
-    const hashParams = new URLSearchParams(url.hash.substring(1));
-    const accessToken = hashParams.get('access_token');
-    const refreshToken = hashParams.get('refresh_token');
-
-    if (accessToken) {
-      // Get user info
-      const userResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'apikey': SUPABASE_ANON_KEY,
-        }
-      });
-
-      const user = await userResponse.json();
-
-      // Store session
-      const session = {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        user: user
-      };
-
-      await chrome.storage.local.set({ session });
-      currentUser = user;
-
-      await fetchPeeboUser();
-    }
-  } catch (error) {
-    console.error('Sign in failed:', error);
-    showToast('Sign in failed', 'error');
-  } finally {
-    signInBtn.disabled = false;
-    signInBtn.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
-        <circle cx="10" cy="6" r="4"/>
-        <path d="M2 18c0-4 3.5-7 8-7s8 3 8 7"/>
-      </svg>
-      Sign in with Google
-    `;
-  }
 }
 
 // Handle apply
@@ -308,14 +82,6 @@ async function handleApplyDetected() {
 async function startApplication(jobUrl) {
   if (isApplying) return;
 
-  // Check usage limits
-  if (peeboUser.tier !== 'premium' &&
-      peeboUser.apps_used_this_month >= peeboUser.monthly_app_limit) {
-    showToast('Monthly limit reached. Upgrade for unlimited!', 'error');
-    upgradeBtn.classList.remove('hidden');
-    return;
-  }
-
   isApplying = true;
   setMascotState('working');
   showProgress();
@@ -324,8 +90,7 @@ async function startApplication(jobUrl) {
     // Send application request to service worker
     const response = await chrome.runtime.sendMessage({
       type: 'START_APPLICATION',
-      jobUrl: jobUrl,
-      userId: peeboUser.id
+      jobUrl: jobUrl
     });
 
     if (response.success) {
@@ -406,16 +171,10 @@ function hideProgress() {
 }
 
 // Application complete
-async function onApplicationComplete(result) {
+function onApplicationComplete(result) {
   isApplying = false;
   setMascotState('success');
   hideProgress();
-
-  // Update usage locally
-  peeboUser.apps_used_this_month++;
-  await chrome.storage.local.set({ peeboUser });
-  updateUsageMeter();
-
   showToast('Application submitted!', 'success');
 
   // Reset mascot after delay
@@ -445,33 +204,6 @@ function handleCancel() {
   hideProgress();
   setMascotState('idle');
   showToast('Application cancelled', 'error');
-}
-
-// Handle upgrade
-async function handleUpgrade() {
-  try {
-    const session = await chrome.storage.local.get('session');
-
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/peebo-checkout`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.session.access_token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        priceId: 'price_peebo_premium_monthly' // Replace with actual Stripe price ID
-      })
-    });
-
-    const { url } = await response.json();
-
-    if (url) {
-      chrome.tabs.create({ url });
-    }
-  } catch (error) {
-    console.error('Upgrade failed:', error);
-    showToast('Failed to start upgrade', 'error');
-  }
 }
 
 // Check current tab for job posting

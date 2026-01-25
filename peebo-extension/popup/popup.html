@@ -30,100 +30,56 @@
 
     <!-- Main Content -->
     <main class="popup-main">
-      <!-- Not Logged In State -->
-      <section id="auth-section" class="section hidden">
-        <div class="auth-prompt">
-          <p class="text-secondary text-center mb-4">Sign in to start applying to jobs automatically.</p>
-          <button class="btn btn-primary btn-lg w-full" id="sign-in-btn">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="10" cy="6" r="4"/>
-              <path d="M2 18c0-4 3.5-7 8-7s8 3 8 7"/>
+      <!-- Current Page Detection -->
+      <div id="detected-job" class="detected-job hidden">
+        <div class="detected-job-info">
+          <span class="label">Detected job posting</span>
+          <p class="company-role" id="detected-company-role">Company - Role</p>
+        </div>
+        <button class="btn btn-primary" id="apply-detected-btn">
+          Apply
+        </button>
+      </div>
+
+      <!-- URL Input -->
+      <div class="url-input-group">
+        <div class="input-wrapper">
+          <svg class="input-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 4H5a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-3"/>
+            <path d="M12 3h5v5"/>
+            <path d="M17 3L9 11"/>
+          </svg>
+          <input type="url" class="input" id="job-url" placeholder="Paste job URL...">
+        </div>
+        <button class="btn btn-primary" id="apply-btn" disabled>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 2l6 4-6 4-6-4 6-4z"/>
+            <path d="M4 10l6 4 6-4"/>
+            <path d="M4 14l6 4 6-4"/>
+          </svg>
+          Apply
+        </button>
+      </div>
+
+      <!-- Progress Section (hidden by default) -->
+      <div id="progress-section" class="progress-section hidden">
+        <div class="progress-header">
+          <span class="progress-status" id="progress-status">Preparing application...</span>
+          <button class="btn btn-icon btn-ghost btn-sm" id="cancel-btn" title="Cancel">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M4 4l8 8M12 4l-8 8"/>
             </svg>
-            Sign in with Google
           </button>
         </div>
-      </section>
-
-      <!-- Onboarding Incomplete State -->
-      <section id="onboarding-section" class="section hidden">
-        <div class="onboarding-prompt">
-          <p class="text-secondary text-center mb-4">Let's get you set up to land your dream job.</p>
-          <button class="btn btn-primary btn-lg w-full" id="complete-setup-btn">
-            Complete setup
-          </button>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
         </div>
-      </section>
-
-      <!-- Ready State -->
-      <section id="apply-section" class="section hidden">
-        <!-- Current Page Detection -->
-        <div id="detected-job" class="detected-job hidden">
-          <div class="detected-job-info">
-            <span class="label">Detected job posting</span>
-            <p class="company-role" id="detected-company-role">Company - Role</p>
-          </div>
-          <button class="btn btn-primary" id="apply-detected-btn">
-            Apply
-          </button>
-        </div>
-
-        <!-- URL Input -->
-        <div class="url-input-group">
-          <div class="input-wrapper">
-            <svg class="input-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M8 4H5a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-3"/>
-              <path d="M12 3h5v5"/>
-              <path d="M17 3L9 11"/>
-            </svg>
-            <input type="url" class="input" id="job-url" placeholder="Paste job URL...">
-          </div>
-          <button class="btn btn-primary" id="apply-btn" disabled>
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M10 2l6 4-6 4-6-4 6-4z"/>
-              <path d="M4 10l6 4 6-4"/>
-              <path d="M4 14l6 4 6-4"/>
-            </svg>
-            Apply
-          </button>
-        </div>
-
-        <!-- Progress Section (hidden by default) -->
-        <div id="progress-section" class="progress-section hidden">
-          <div class="progress-header">
-            <span class="progress-status" id="progress-status">Preparing application...</span>
-            <button class="btn btn-icon btn-ghost btn-sm" id="cancel-btn" title="Cancel">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M4 4l8 8M12 4l-8 8"/>
-              </svg>
-            </button>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-          </div>
-          <p class="progress-detail text-xs text-tertiary" id="progress-detail"></p>
-        </div>
-      </section>
+        <p class="progress-detail text-xs text-tertiary" id="progress-detail"></p>
+      </div>
     </main>
 
     <!-- Footer -->
     <footer class="popup-footer">
-      <!-- Usage Meter -->
-      <div class="usage-meter" id="usage-meter">
-        <div class="usage-info">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="2" y="5" width="12" height="9" rx="1"/>
-            <path d="M5 5V3a3 3 0 016 0v2"/>
-          </svg>
-          <span id="usage-text">3 of 5 applications this month</span>
-        </div>
-        <div class="progress-bar" style="height: 4px;">
-          <div class="progress-fill" id="usage-fill" style="width: 60%"></div>
-        </div>
-        <button class="btn btn-ghost btn-sm upgrade-btn hidden" id="upgrade-btn">
-          Upgrade for unlimited
-        </button>
-      </div>
-
       <!-- Action Buttons -->
       <div class="footer-actions">
         <button class="btn btn-secondary" id="tracker-btn">

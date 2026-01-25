@@ -56,26 +56,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Load applications from storage
 async function loadApplications() {
   try {
-    // Try to pull from Supabase first
-    const response = await chrome.runtime.sendMessage({ type: 'PULL_APPLICATIONS' });
-
-    if (response.applications) {
-      applications = response.applications;
-    } else {
-      // Fall back to local storage
-      const result = await chrome.storage.local.get(['applications']);
-      applications = result.applications || [];
-    }
-
+    const result = await chrome.storage.local.get(['applications']);
+    applications = result.applications || [];
     filteredApps = [...applications];
     renderApplications();
     updateStats();
   } catch (error) {
     console.error('Failed to load applications:', error);
-    // Fall back to local storage
-    const result = await chrome.storage.local.get(['applications']);
-    applications = result.applications || [];
-    filteredApps = [...applications];
+    applications = [];
+    filteredApps = [];
     renderApplications();
     updateStats();
   }
@@ -84,12 +73,6 @@ async function loadApplications() {
 // Save applications to storage
 async function saveApplications() {
   await chrome.storage.local.set({ applications });
-
-  // Sync to Supabase in background
-  chrome.runtime.sendMessage({
-    type: 'SYNC_APPLICATIONS',
-    applications: applications.filter(app => !app.synced)
-  }).catch(console.error);
 }
 
 // Render applications to kanban board
@@ -433,6 +416,8 @@ async function handleFormSubmit(e) {
 // Open delete modal
 function openDeleteModal(id) {
   deleteTargetId = id;
+  // Close edit modal if open
+  closeModal();
   deleteModalOverlay.classList.remove('hidden');
 }
 
