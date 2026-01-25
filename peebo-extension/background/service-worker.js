@@ -3,7 +3,7 @@
 
 // Configuration
 const BROWSER_USE_API_KEY = 'bu_fkMsZKn_HzIRkjT5gcGCPxhvrDvySfHgA402fEfNavc';
-const BROWSER_USE_API_URL = 'https://api.browser-use.com/v1';
+const BROWSER_USE_API_URL = 'https://api.browser-use.com/api/v2';
 const POLL_INTERVAL = 3000; // 3 seconds
 
 // State
@@ -92,7 +92,7 @@ Instructions:
     };
 
     // Call browser-use API
-    const response = await fetch(`${BROWSER_USE_API_URL}/agent/run`, {
+    const response = await fetch(`${BROWSER_USE_API_URL}/tasks`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${BROWSER_USE_API_KEY}`,
@@ -137,7 +137,7 @@ async function pollBrowserUseTask(taskId) {
 
   try {
     // Check task status from browser-use API
-    const response = await fetch(`${BROWSER_USE_API_URL}/agent/status/${task.browserUseTaskId}`, {
+    const response = await fetch(`${BROWSER_USE_API_URL}/tasks/${task.browserUseTaskId}`, {
       headers: {
         'Authorization': `Bearer ${BROWSER_USE_API_KEY}`
       }
@@ -254,7 +254,7 @@ async function cancelApplication() {
 
       // Try to cancel on browser-use side (best effort)
       try {
-        await fetch(`${BROWSER_USE_API_URL}/agent/cancel/${task.browserUseTaskId}`, {
+        await fetch(`${BROWSER_USE_API_URL}/tasks/${task.browserUseTaskId}/cancel`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${BROWSER_USE_API_KEY}`
