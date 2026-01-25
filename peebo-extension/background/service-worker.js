@@ -17,8 +17,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.tabs.create({ url: chrome.runtime.getURL('onboarding/onboarding.html') });
   }
 
+  // Set up periodic sync alarm
+  chrome.alarms.create('syncApplications', { periodInMinutes: 15 });
+
   // Check for existing session
   await loadSession();
+});
+
+// Also set up alarm on startup (in case extension was updated)
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create('syncApplications', { periodInMinutes: 15 });
 });
 
 // Load session from storage
@@ -480,8 +488,6 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 // Handle alarm for periodic sync
-chrome.alarms.create('syncApplications', { periodInMinutes: 15 });
-
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'syncApplications') {
     try {
