@@ -209,6 +209,27 @@ function createJobCard(job) {
     stagePill = `<span class="stage-pill ${stageClass}" data-job-id="${job.id}">${stageLabels[job.interview_stage]}</span>`;
   }
   
+  // Determine action banner
+  let actionBanner = '';
+  let actionClass = '';
+  if (needsFollowUp(job)) {
+    actionBanner = '⚠️ FOLLOW UP NEEDED';
+    actionClass = 'urgent';
+  } else {
+    const upcomingInterview = getUpcomingInterview(job);
+    if (upcomingInterview) {
+      const date = new Date(upcomingInterview.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      actionBanner = `📅 INTERVIEW: ${date} - ${upcomingInterview.type}`;
+      actionClass = 'interview';
+    } else if (job.nextAction) {
+      actionBanner = job.nextAction.toUpperCase();
+      actionClass = 'waiting';
+    } else {
+      actionBanner = 'WAITING FOR RESPONSE';
+      actionClass = 'waiting';
+    }
+  }
+
   // Salary display
   let salaryText = '';
   if (job.salaryMin || job.salaryMax) {
@@ -220,27 +241,43 @@ function createJobCard(job) {
       salaryText = `Up to $${Math.round(job.salaryMax/1000)}k`;
     }
   }
-  
+
+  // Days since applied
+  const daysSince = Math.floor((new Date() - new Date(job.dateApplied)) / (1000 * 60 * 60 * 24));
+  const daysText = daysSince === 0 ? 'Today' : daysSince === 1 ? '1 day ago' : `${daysSince} days ago`;
+
   return `
-    <div class="job-card" 
-         data-job-id="${job.id}" 
+    <div class="job-card"
+         data-job-id="${job.id}"
          draggable="true"
          onclick="openDetailModal('${job.id}')"
          oncontextmenu="showCardContextMenu(event, '${job.id}')">
-      <div class="job-card-header">
-        <h3>${escapeHtml(job.company)}</h3>
-        ${job.jobUrl ? `<a href="${escapeHtml(job.jobUrl)}" target="_blank" onclick="event.stopPropagation()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M6 10l8-8M14 6V2h-4M14 2L8 8"/>
-          </svg>
-        </a>` : ''}
+      <div class="job-card-action ${actionClass}">
+        ${actionBanner}
       </div>
-      <p class="job-role">${escapeHtml(job.role)}</p>
-      ${salaryText ? `<p class="job-salary">${salaryText}</p>` : ''}
-      ${stagePill}
-      ${badges.length > 0 ? `<div class="card-badges">${badges.join('')}</div>` : ''}
-      <div class="job-card-footer">
-        <span class="job-date">Applied ${formatDateShort(job.dateApplied)}</span>
+      <div class="job-card-body">
+        <div class="job-card-header">
+          <h3>${escapeHtml(job.company)}</h3>
+          ${job.jobUrl ? `<a href="${escapeHtml(job.jobUrl)}" target="_blank" onclick="event.stopPropagation()" title="Open job posting">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 10l8-8M14 6V2h-4M14 2L8 8"/>
+            </svg>
+          </a>` : ''}
+        </div>
+        <p class="job-role">${escapeHtml(job.role)}</p>
+        ${stagePill}
+
+        <div class="job-details-grid">
+          ${salaryText ? `<div class="detail-item"><span class="detail-label">Salary</span><span class="detail-value salary">${salaryText}</span></div>` : ''}
+          <div class="detail-item">
+            <span class="detail-label">Applied</span>
+            <span class="detail-value date">${daysText}</span>
+          </div>
+          ${job.recruiterName ? `<div class="detail-item"><span class="detail-label">Recruiter</span><span class="detail-value">${escapeHtml(job.recruiterName)}</span></div>` : ''}
+          ${job.referralStatus === 'received' ? `<div class="detail-item"><span class="detail-label">Referral</span><span class="detail-value referral">✓ ${escapeHtml(job.referralContact || 'Yes')}</span></div>` : ''}
+        </div>
+
+        ${badges.length > 0 ? `<div class="card-badges">${badges.join('')}</div>` : ''}
       </div>
     </div>
   `;
