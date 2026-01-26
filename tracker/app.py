@@ -27,6 +27,36 @@ def index():
     return send_from_directory(TRACKER_DIR, 'index.html')
 
 
+@app.route('/design-system.css')
+def design_system():
+    """Serve the Peebo design system CSS."""
+    return send_from_directory(TRACKER_DIR, 'design-system.css')
+
+
+@app.route('/tracker.css')
+def tracker_css():
+    """Serve the tracker CSS."""
+    return send_from_directory(TRACKER_DIR, 'tracker.css')
+
+
+@app.route('/tracker.js')
+def tracker_js():
+    """Serve the tracker JavaScript."""
+    return send_from_directory(TRACKER_DIR, 'tracker.js')
+
+
+@app.route('/storage-adapter.js')
+def storage_adapter():
+    """Serve the storage adapter JavaScript."""
+    return send_from_directory(TRACKER_DIR, 'storage-adapter.js')
+
+
+@app.route('/assets/<path:filename>')
+def serve_assets(filename):
+    """Serve mascot and other assets."""
+    return send_from_directory(TRACKER_DIR / 'assets', filename)
+
+
 @app.route('/jobs.json')
 def jobs():
     """Serve the jobs data."""

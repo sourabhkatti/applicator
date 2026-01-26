@@ -3,933 +3,471 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Job Tracker</title>
-  <style>
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f7fa;
-  color: #1a1a2e;
-  min-height: 100vh;
-}
-
-#app {
-  padding: 20px;
-}
-
-/* Header */
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-header h1 {
-  font-size: 24px;
-  color: #1a1a2e;
-}
-
-#metrics {
-  display: flex;
-  gap: 20px;
-  font-size: 14px;
-}
-
-.metric {
-  background: #fff;
-  padding: 8px 16px;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-
-.metric-value {
-  font-weight: bold;
-  color: #4ecca3;
-}
-
-/* Filter bar */
-#filter-bar {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-#search {
-  padding: 10px 16px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #fff;
-  color: #1a1a2e;
-  width: 250px;
-  font-size: 14px;
-}
-
-#search::placeholder {
-  color: #999;
-}
-
-#status-filters {
-  display: flex;
-  gap: 8px;
-}
-
-.filter-btn {
-  padding: 8px 16px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #fff;
-  color: #666;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s;
-}
-
-.filter-btn:hover {
-  background: #f0f0f0;
-}
-
-.filter-btn.active {
-  background: #4ecca3;
-  color: #fff;
-  border-color: #4ecca3;
-}
-
-#salary-filters {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-}
-
-#salary-filters input {
-  width: 80px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: #fff;
-  color: #1a1a2e;
-}
-
-/* Kanban board */
-#kanban {
-  display: flex;
-  gap: 16px;
-  overflow-x: auto;
-  padding-bottom: 20px;
-}
-
-.column {
-  min-width: 280px;
-  background: #e8ecf1;
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.column h2 {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 16px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.cards {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* Job cards */
-.card {
-  background: #fff;
-  border-radius: 10px;
-  padding: 16px;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  border-left: 4px solid #ccc;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-
-.card.dragging {
-  opacity: 0.5;
-  transform: rotate(3deg);
-}
-
-.column.drag-over {
-  background: #d4edda;
-  border: 2px dashed #4ecca3;
-}
-
-.card.needs-followup {
-  border-left-color: #e74c3c;
-}
-
-.card.interview-scheduled {
-  border-left-color: #4ecca3;
-}
-
-.card.has-referral {
-  border-left-color: #f39c12;
-}
-
-.card-company {
-  font-weight: bold;
-  font-size: 16px;
-  margin-bottom: 4px;
-  color: #1a1a2e;
-}
-
-.card-role {
-  color: #666;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-
-.card-meta {
-  font-size: 12px;
-  color: #888;
-}
-
-.card-badge {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  margin-top: 8px;
-}
-
-.badge-followup {
-  background: #e74c3c;
-  color: #fff;
-}
-
-.badge-interview {
-  background: #4ecca3;
-  color: #1a1a2e;
-}
-
-.badge-referral {
-  background: #f39c12;
-  color: #1a1a2e;
-}
-
-/* Modal */
-#modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-#modal.hidden {
-  display: none;
-}
-
-#modal-content {
-  background: #fff;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 700px;
-  max-height: 90vh;
-  overflow-y: auto;
-  position: relative;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-}
-
-#modal-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 28px;
-  cursor: pointer;
-}
-
-#modal-close:hover {
-  color: #333;
-}
-
-#modal-body {
-  padding: 24px;
-}
-
-.modal-section {
-  margin-bottom: 24px;
-}
-
-.modal-section h3 {
-  font-size: 12px;
-  color: #4ecca3;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
-}
-
-.modal-field {
-  margin-bottom: 12px;
-}
-
-.modal-field label {
-  display: block;
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 4px;
-}
-
-.modal-field span {
-  font-size: 15px;
-  color: #1a1a2e;
-}
-
-.modal-notes {
-  background: #f5f7fa;
-  border-radius: 8px;
-  padding: 16px;
-  white-space: pre-wrap;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #1a1a2e;
-}
-
-.prep-checklist {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.prep-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.prep-item.done {
-  color: #4ecca3;
-}
-
-.prep-item.pending {
-  color: #888;
-}
-
-/* Offer section */
-.offer-details {
-  background: #f5f7fa;
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.offer-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.offer-row:last-child {
-  border-bottom: none;
-}
-
-.offer-label {
-  color: #888;
-}
-
-.offer-value {
-  font-weight: bold;
-  color: #4ecca3;
-}
-
-/* Notification toast */
-#notification {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%) translateY(100px);
-  background: #1a1a2e;
-  color: #fff;
-  padding: 12px 24px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  z-index: 2000;
-  opacity: 0;
-  transition: all 0.3s ease;
-}
-
-#notification.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-  </style>
+  <title>Job Application Tracker</title>
+  <link rel="stylesheet" href="/design-system.css">
+  <link rel="stylesheet" href="/tracker.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div id="app">
-    <!-- Header with metrics -->
-    <header id="header">
-      <h1>Job Tracker</h1>
-      <div id="metrics"></div>
+  <div class="tracker-container">
+    <!-- Header -->
+    <header class="tracker-header">
+      <div class="header-left">
+        <img src="/assets/mascot/peebo-idle.svg" alt="Peebo" class="mascot" id="mascot">
+        <h1>My applications</h1>
+      </div>
+      <div class="header-right">
+        <div class="search-wrapper">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="5"/>
+            <path d="M12 12l4 4"/>
+          </svg>
+          <input type="text" class="input search-input" id="search-input" placeholder="Search applications...">
+        </div>
+        <button class="btn btn-primary" id="add-btn">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 3v12M3 9h12"/>
+          </svg>
+          Add
+        </button>
+        <button class="btn btn-icon btn-ghost" id="settings-btn" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="10" cy="10" r="3"/>
+            <path d="M10 1v2m0 14v2M1 10h2m14 0h2M3.5 3.5l1.5 1.5m10 10l1.5 1.5M3.5 16.5l1.5-1.5m10-10l1.5-1.5"/>
+          </svg>
+        </button>
+      </div>
     </header>
 
-    <!-- Filter bar -->
-    <div id="filter-bar">
-      <input type="text" id="search" placeholder="Search jobs...">
-      <div id="status-filters">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="follow-up">Needs Follow-up</button>
-        <button class="filter-btn" data-filter="scheduled">Interview Scheduled</button>
-        <button class="filter-btn" data-filter="waiting">Waiting</button>
+    <!-- Active Applications (In Progress) -->
+    <div class="active-applications hidden" id="active-applications">
+      <div class="active-header">
+        <div class="active-title">
+          <div class="pulse-indicator"></div>
+          <h2>In application now</h2>
+          <span class="active-count" id="active-count">0</span>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="refresh-active">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 8a6 6 0 0112 0M14 8a6 6 0 01-12 0"/>
+            <path d="M2 4v4h4M14 12V8h-4"/>
+          </svg>
+          Refresh
+        </button>
       </div>
-      <div id="salary-filters">
-        <label>Min: $<input type="number" id="salary-min" placeholder="0" step="10000"></label>
-        <label>Max: $<input type="number" id="salary-max" placeholder="999999" step="10000"></label>
+
+      <div class="active-jobs" id="active-jobs">
+        <!-- Active job cards inserted here -->
       </div>
     </div>
 
-    <!-- Kanban board -->
-    <div id="kanban">
-      <div class="column" data-status="applied">
-        <h2>Applied</h2>
-        <div class="cards"></div>
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-value" id="stat-total">0</span>
+        <span class="stat-label">Total</span>
       </div>
-      <div class="column" data-status="recruiter_screen">
-        <h2>Recruiter Screen</h2>
-        <div class="cards"></div>
+      <div class="stat">
+        <span class="stat-value stat-applied" id="stat-applied">0</span>
+        <span class="stat-label">Applied</span>
       </div>
-      <div class="column" data-status="hiring_manager">
-        <h2>Hiring Manager</h2>
-        <div class="cards"></div>
+      <div class="stat">
+        <span class="stat-value stat-interviewing" id="stat-interviewing">0</span>
+        <span class="stat-label">Interviewing</span>
       </div>
-      <div class="column" data-status="panel_onsite">
-        <h2>Panel/Onsite</h2>
-        <div class="cards"></div>
-      </div>
-      <div class="column" data-status="offer">
-        <h2>Offer</h2>
-        <div class="cards"></div>
-      </div>
-      <div class="column" data-status="rejected">
-        <h2>Rejected</h2>
-        <div class="cards"></div>
+      <div class="stat">
+        <span class="stat-value stat-offer" id="stat-offer">0</span>
+        <span class="stat-label">Offers</span>
       </div>
     </div>
 
-    <!-- Detail modal -->
-    <div id="modal" class="hidden">
-      <div id="modal-content">
-        <button id="modal-close">&times;</button>
-        <div id="modal-body"></div>
+    <!-- Kanban Board -->
+    <main class="kanban-board" id="kanban-board">
+      <!-- Applied Column -->
+      <div class="kanban-column" data-status="applied">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot applied"></span>
+            <h2>Applied</h2>
+            <span class="column-count" id="count-applied">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-applied" data-status="applied">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+
+      <!-- Interviewing Column -->
+      <div class="kanban-column" data-status="interviewing">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot interviewing"></span>
+            <h2>Interviewing</h2>
+            <span class="column-count" id="count-interviewing">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-interviewing" data-status="interviewing">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+
+      <!-- Rejected Column -->
+      <div class="kanban-column" data-status="rejected">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot rejected"></span>
+            <h2>Rejected</h2>
+            <span class="column-count" id="count-rejected">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-rejected" data-status="rejected">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+
+      <!-- Offer Column -->
+      <div class="kanban-column" data-status="offer">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="status-dot offer"></span>
+            <h2>Offer</h2>
+            <span class="column-count" id="count-offer">0</span>
+          </div>
+        </div>
+        <div class="column-cards" id="cards-offer" data-status="offer">
+          <!-- Cards inserted here -->
+        </div>
+      </div>
+    </main>
+
+    <!-- Add/Edit Modal (Simple) -->
+    <div class="modal-overlay hidden" id="add-modal-overlay">
+      <div class="modal" id="add-modal">
+        <div class="modal-header">
+          <h2>Add application</h2>
+          <button class="btn btn-icon btn-ghost modal-close">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 5l10 10M15 5l-10 10"/>
+            </svg>
+          </button>
+        </div>
+        <form id="add-form">
+          <div class="form-group">
+            <label class="form-label" for="add-company">Company *</label>
+            <input type="text" class="input" id="add-company" required placeholder="e.g., Acme Corp">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="add-role">Role *</label>
+            <input type="text" class="input" id="add-role" required placeholder="e.g., Senior Product Manager">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="add-url">Job URL</label>
+            <input type="url" class="input" id="add-url" placeholder="https://...">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="add-status">Status</label>
+              <select class="input" id="add-status">
+                <option value="applied">Applied</option>
+                <option value="interviewing">Interviewing</option>
+                <option value="rejected">Rejected</option>
+                <option value="offer">Offer</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="add-salary-min">Min salary</label>
+              <input type="number" class="input" id="add-salary-min" placeholder="150000">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="add-salary-max">Max salary</label>
+              <input type="number" class="input" id="add-salary-max" placeholder="180000">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="add-notes">Notes</label>
+            <textarea class="input" id="add-notes" rows="3" placeholder="Any notes about this application..."></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Add application</button>
+          </div>
+        </form>
       </div>
     </div>
+
+    <!-- Detailed View Modal (6 Tabs) -->
+    <div class="modal-overlay hidden" id="detail-modal-overlay">
+      <div class="modal modal-large" id="detail-modal">
+        <div class="modal-header">
+          <h2 id="detail-title">Application details</h2>
+          <button class="btn btn-icon btn-ghost modal-close">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 5l10 10M15 5l-10 10"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-tabs">
+          <button class="tab-btn active" data-tab="basic">Basic</button>
+          <button class="tab-btn" data-tab="contacts">Contacts</button>
+          <button class="tab-btn" data-tab="interviews">Interviews</button>
+          <button class="tab-btn" data-tab="prep">Prep</button>
+          <button class="tab-btn" data-tab="offer">Offer</button>
+          <button class="tab-btn" data-tab="notes">Notes</button>
+        </div>
+
+        <form id="detail-form">
+          <input type="hidden" id="detail-id">
+
+          <!-- Basic Tab -->
+          <div class="tab-content active" data-tab="basic">
+            <div class="form-group">
+              <label class="form-label" for="detail-company">Company</label>
+              <input type="text" class="input" id="detail-company" required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-role">Role</label>
+              <input type="text" class="input" id="detail-role" required>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="detail-status">Status</label>
+                <select class="input" id="detail-status">
+                  <option value="applied">Applied</option>
+                  <option value="interviewing">Interviewing</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="offer">Offer</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="detail-interview-stage">Interview stage</label>
+                <select class="input" id="detail-interview-stage">
+                  <option value="">None</option>
+                  <option value="recruiter_screen">Recruiter screen</option>
+                  <option value="hiring_manager">Hiring manager</option>
+                  <option value="panel_onsite">Panel/Onsite</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-url">Job URL</label>
+              <input type="url" class="input" id="detail-url">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="detail-date-applied">Date applied</label>
+                <input type="date" class="input" id="detail-date-applied">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="detail-last-activity">Last activity</label>
+                <input type="date" class="input" id="detail-last-activity">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="detail-follow-up-by">Follow up by</label>
+                <input type="date" class="input" id="detail-follow-up-by">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="detail-salary-min">Min salary</label>
+                <input type="number" class="input" id="detail-salary-min">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="detail-salary-max">Max salary</label>
+                <input type="number" class="input" id="detail-salary-max">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-next-action">Next action</label>
+              <input type="text" class="input" id="detail-next-action">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-referral-status">Referral status</label>
+              <select class="input" id="detail-referral-status">
+                <option value="none">None</option>
+                <option value="requested">Requested</option>
+                <option value="received">Received</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Contacts Tab -->
+          <div class="tab-content" data-tab="contacts">
+            <h3>Recruiter</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="detail-recruiter-name">Name</label>
+                <input type="text" class="input" id="detail-recruiter-name">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="detail-recruiter-email">Email</label>
+                <input type="email" class="input" id="detail-recruiter-email">
+              </div>
+            </div>
+
+            <h3>Hiring manager</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="detail-hm-name">Name</label>
+                <input type="text" class="input" id="detail-hm-name">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="detail-hm-email">Email</label>
+                <input type="email" class="input" id="detail-hm-email">
+              </div>
+            </div>
+
+            <h3>Referral</h3>
+            <div class="form-group">
+              <label class="form-label" for="detail-referral-contact">Referral contact</label>
+              <input type="text" class="input" id="detail-referral-contact" placeholder="Name or email">
+            </div>
+          </div>
+
+          <!-- Interviews Tab -->
+          <div class="tab-content" data-tab="interviews">
+            <div class="interviews-list" id="interviews-list">
+              <!-- Interview items inserted here -->
+            </div>
+            <button type="button" class="btn btn-secondary" id="add-interview-btn">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 2v12M2 8h12"/>
+              </svg>
+              Add interview
+            </button>
+          </div>
+
+          <!-- Prep Tab -->
+          <div class="tab-content" data-tab="prep">
+            <div class="checklist">
+              <label class="checkbox-label">
+                <input type="checkbox" id="prep-company-research">
+                <span>Company research completed</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="prep-star-stories">
+                <span>STAR stories prepared</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="prep-questions-ready">
+                <span>Questions for interviewer ready</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="prep-technical-prep">
+                <span>Technical prep completed</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Offer Tab -->
+          <div class="tab-content" data-tab="offer">
+            <div class="form-group">
+              <label class="form-label" for="detail-offer-initial">Initial offer</label>
+              <input type="number" class="input" id="detail-offer-initial">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-offer-counter">Counter offer</label>
+              <input type="number" class="input" id="detail-offer-counter">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-offer-final">Final offer</label>
+              <input type="number" class="input" id="detail-offer-final">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-offer-bonus">Bonus</label>
+              <input type="number" class="input" id="detail-offer-bonus">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-offer-equity">Equity</label>
+              <input type="text" class="input" id="detail-offer-equity" placeholder="e.g., 10,000 shares, 4-year vest">
+            </div>
+          </div>
+
+          <!-- Notes Tab -->
+          <div class="tab-content" data-tab="notes">
+            <div class="form-group">
+              <label class="form-label" for="detail-notes">Application notes</label>
+              <textarea class="input" id="detail-notes" rows="5" placeholder="General notes about this application..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="detail-company-research">Company research</label>
+              <textarea class="input" id="detail-company-research" rows="5" placeholder="Research about the company, products, culture, etc..."></textarea>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay hidden" id="settings-modal-overlay">
+      <div class="modal" id="settings-modal">
+        <div class="modal-header">
+          <h2>⚙️ Settings</h2>
+          <button class="btn btn-icon btn-ghost modal-close">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 5l10 10M15 5l-10 10"/>
+            </svg>
+          </button>
+        </div>
+        <form id="settings-form">
+          <div class="form-group">
+            <label class="form-label" for="settings-follow-up-days">Follow-up after (working days)</label>
+            <input type="number" class="input" id="settings-follow-up-days" min="1" max="30" value="2">
+            <p class="help-text">
+              Jobs will show "Follow up" badge after this many working days
+              (weekends excluded) since last activity.
+            </p>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save settings</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu hidden" id="context-menu">
+      <!-- Menu items inserted dynamically -->
+    </div>
+
   </div>
 
-  <script>
-let jobsData = { jobs: [], settings: { followUpDays: 2 } };
-let activeFilters = { status: 'all', search: '', salaryMin: 0, salaryMax: Infinity };
-let configLoaded = false;
-
-const STORAGE_KEY = 'jobTrackerData';
-
-// Check if applicant config exists
-async function checkConfig() {
-  try {
-    const response = await fetch('/api/config');
-    // Check if response is JSON (Flask API) vs HTML (static server 404)
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      // Static server - no API available, continue in static mode
-      console.log('Running in static mode (no Flask API)');
-      configLoaded = true;
-      return true;
-    }
-    if (response.status === 404) {
-      const data = await response.json();
-      if (data.setup_required) {
-        showSetupRequired();
-        return false;
-      }
-    }
-    const config = await response.json();
-    if (config.setup_required) {
-      showSetupRequired();
-      return false;
-    }
-    configLoaded = true;
-    // Update header with user name if available
-    if (config.name) {
-      document.querySelector('header h1').textContent = `Job Tracker - ${config.name}`;
-    }
-    return true;
-  } catch (e) {
-    // Server not running or no API - that's OK, continue with static mode
-    console.log('Config API not available, running in static mode');
-    configLoaded = true;
-    return true;
-  }
-}
-
-// Show setup required message
-function showSetupRequired() {
-  document.getElementById('kanban').innerHTML = `
-    <div style="text-align: center; padding: 60px 20px; background: #fff; border-radius: 12px; max-width: 500px; margin: 40px auto;">
-      <h2 style="color: #1a1a2e; margin-bottom: 16px;">Setup Required</h2>
-      <p style="color: #666; margin-bottom: 24px; line-height: 1.6;">
-        Welcome! Before you can start tracking jobs, you need to set up your applicant profile.
-      </p>
-      <p style="color: #666; margin-bottom: 24px; line-height: 1.6;">
-        Open <strong>Claude Code</strong> in this repository and Claude will guide you through the setup process.
-      </p>
-      <div style="background: #f5f7fa; padding: 16px; border-radius: 8px; text-align: left; font-family: monospace; font-size: 13px;">
-        <div style="color: #888; margin-bottom: 8px;"># In the applicator directory:</div>
-        <div style="color: #4ecca3;">claude</div>
-      </div>
-      <p style="color: #888; font-size: 13px; margin-top: 24px;">
-        Or copy <code>applicant.yaml.example</code> to <code>applicant.yaml</code> and fill in your details.
-      </p>
-    </div>
-  `;
-  document.getElementById('filter-bar').style.display = 'none';
-  document.getElementById('metrics').style.display = 'none';
-}
-
-// Save data to localStorage
-function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(jobsData));
-  console.log('Data saved to localStorage');
-}
-
-// Load data - always fetch fresh from server
-async function loadData() {
-  try {
-    // Always fetch from server with cache-busting
-    const response = await fetch('jobs.json?t=' + Date.now(), { cache: 'no-store' });
-    jobsData = await response.json();
-    console.log('Loaded from jobs.json (' + jobsData.jobs.length + ' jobs)');
-    render();
-    renderMetrics();
-  } catch (e) {
-    console.error('Failed to load data:', e);
-    document.getElementById('kanban').innerHTML = '<p style="padding:20px;color:#e74c3c;">Error loading data. Make sure jobs.json exists and you\'re serving the page via a local server.</p>';
-  }
-}
-
-// Reset to jobs.json (discard localStorage)
-async function resetToFile() {
-  localStorage.removeItem(STORAGE_KEY);
-  const response = await fetch('jobs.json');
-  jobsData = await response.json();
-  render();
-  renderMetrics();
-  showNotification('Reset to jobs.json');
-}
-
-// Calculate if job needs follow-up
-function needsFollowUp(job) {
-  if (job.status === 'rejected' || job.status === 'offer') return false;
-
-  const now = new Date();
-  const lastActivity = new Date(job.lastActivityDate);
-
-  // Check manual follow-up date first
-  if (job.followUpBy) {
-    return new Date(job.followUpBy) <= now;
-  }
-
-  // Calculate working days since last activity
-  let workingDays = 0;
-  let checkDate = new Date(lastActivity);
-  while (checkDate < now) {
-    checkDate.setDate(checkDate.getDate() + 1);
-    const day = checkDate.getDay();
-    if (day !== 0 && day !== 6) workingDays++;
-  }
-
-  return workingDays >= jobsData.settings.followUpDays;
-}
-
-// Check if job has upcoming interview
-function hasUpcomingInterview(job) {
-  if (!job.interviews || job.interviews.length === 0) return false;
-  const now = new Date();
-  return job.interviews.some(i => new Date(i.date) > now);
-}
-
-// Get next interview date
-function getNextInterview(job) {
-  if (!job.interviews || job.interviews.length === 0) return null;
-  const now = new Date();
-  const upcoming = job.interviews
-    .filter(i => new Date(i.date) > now)
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
-  return upcoming[0] || null;
-}
-
-// Format currency
-function formatSalary(amount) {
-  return '$' + (amount / 1000) + 'K';
-}
-
-// Format date
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-// Create job card HTML
-function createCard(job) {
-  const needsFollowup = needsFollowUp(job);
-  const hasInterview = hasUpcomingInterview(job);
-  const nextInterview = getNextInterview(job);
-  const hasReferral = job.referralStatus === 'received';
-
-  let cardClass = 'card';
-  if (needsFollowup) cardClass += ' needs-followup';
-  else if (hasInterview) cardClass += ' interview-scheduled';
-  else if (hasReferral) cardClass += ' has-referral';
-
-  let badges = '';
-  if (needsFollowup) {
-    badges += '<span class="card-badge badge-followup">Follow up!</span>';
-  }
-  if (nextInterview) {
-    const interviewDate = new Date(nextInterview.date);
-    const daysUntil = Math.ceil((interviewDate - new Date()) / (1000 * 60 * 60 * 24));
-    badges += `<span class="card-badge badge-interview">${nextInterview.type}: ${daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : formatDate(nextInterview.date)}</span>`;
-  }
-  if (hasReferral) {
-    badges += '<span class="card-badge badge-referral">Referral</span>';
-  }
-
-  return `
-    <div class="${cardClass}" data-id="${job.id}" draggable="true" ondragstart="handleDragStart(event)" ondragend="handleDragEnd(event)">
-      <div class="card-company">${job.company}</div>
-      <div class="card-role">${job.role}</div>
-      <div class="card-meta">Applied: ${formatDate(job.dateApplied)}</div>
-      <div class="card-meta">Next: ${job.nextAction || 'N/A'}</div>
-      ${badges}
-    </div>
-  `;
-}
-
-// Filter jobs
-function filterJobs(jobs) {
-  return jobs.filter(job => {
-    // Status filter
-    if (activeFilters.status === 'follow-up' && !needsFollowUp(job)) return false;
-    if (activeFilters.status === 'scheduled' && !hasUpcomingInterview(job)) return false;
-    if (activeFilters.status === 'waiting' && (needsFollowUp(job) || hasUpcomingInterview(job))) return false;
-
-    // Salary filter
-    if (job.salaryMin < activeFilters.salaryMin) return false;
-    if (job.salaryMax > activeFilters.salaryMax && activeFilters.salaryMax !== Infinity) return false;
-
-    // Search filter
-    if (activeFilters.search) {
-      const searchLower = activeFilters.search.toLowerCase();
-      const searchFields = [
-        job.company, job.role, job.notes, job.companyResearch,
-        job.recruiterName, job.hiringManagerName, job.referralContact
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (!searchFields.includes(searchLower)) return false;
-    }
-
-    return true;
-  });
-}
-
-// Render kanban board
-function render() {
-  const statuses = ['applied', 'recruiter_screen', 'hiring_manager', 'panel_onsite', 'offer', 'rejected'];
-  const filteredJobs = filterJobs(jobsData.jobs);
-
-  statuses.forEach(status => {
-    const column = document.querySelector(`.column[data-status="${status}"] .cards`);
-    const jobs = filteredJobs.filter(j => j.status === status);
-    column.innerHTML = jobs.map(createCard).join('');
-  });
-
-  // Add click handlers for cards (since we removed onclick for drag)
-  document.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (!card.classList.contains('dragging')) {
-        openModal(card.dataset.id);
-      }
-    });
-  });
-}
-
-// Drag and drop state
-let draggedCard = null;
-let pendingChanges = [];
-
-// Drag start
-function handleDragStart(e) {
-  draggedCard = e.target.closest('.card');
-  draggedCard.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', draggedCard.dataset.id);
-}
-
-// Drag end
-function handleDragEnd(e) {
-  if (draggedCard) {
-    draggedCard.classList.remove('dragging');
-  }
-  draggedCard = null;
-  document.querySelectorAll('.column').forEach(col => col.classList.remove('drag-over'));
-}
-
-// Handle drop on column
-function handleDrop(e, newStatus) {
-  e.preventDefault();
-  const column = e.target.closest('.column');
-  if (column) {
-    column.classList.remove('drag-over');
-  }
-
-  if (!draggedCard) return;
-
-  const jobId = draggedCard.dataset.id;
-  const job = jobsData.jobs.find(j => j.id === jobId);
-
-  if (job && job.status !== newStatus) {
-    const oldStatus = job.status;
-    job.status = newStatus;
-    job.lastActivityDate = new Date().toISOString().split('T')[0];
-
-    // Track the change
-    const statusNames = {
-      'applied': 'Applied',
-      'recruiter_screen': 'Recruiter Screen',
-      'hiring_manager': 'Hiring Manager',
-      'panel_onsite': 'Panel/Onsite',
-      'offer': 'Offer',
-      'rejected': 'Rejected'
-    };
-
-    pendingChanges.push({
-      company: job.company,
-      from: statusNames[oldStatus],
-      to: statusNames[newStatus],
-      jobId: jobId
-    });
-
-    // Show notification
-    showNotification(`Moved ${job.company} to ${statusNames[newStatus]}`);
-
-    render();
-    renderMetrics();
-    saveData();
-  }
-}
-
-// Notification system
-function showNotification(message) {
-  let notification = document.getElementById('notification');
-  if (!notification) {
-    notification = document.createElement('div');
-    notification.id = 'notification';
-    document.body.appendChild(notification);
-  }
-  notification.textContent = message;
-  notification.classList.add('show');
-  setTimeout(() => notification.classList.remove('show'), 3000);
-}
-
-// Initialize column drop zones
-function initDragDrop() {
-  document.querySelectorAll('.column').forEach(column => {
-    const status = column.dataset.status;
-
-    column.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      column.classList.add('drag-over');
-    });
-
-    column.addEventListener('dragleave', (e) => {
-      if (!column.contains(e.relatedTarget)) {
-        column.classList.remove('drag-over');
-      }
-    });
-
-    column.addEventListener('drop', (e) => handleDrop(e, status));
-  });
-}
-
-// Render metrics dashboard
-function renderMetrics() {
-  const jobs = jobsData.jobs;
-  const applied = jobs.filter(j => j.status !== 'rejected').length;
-  const recruiterScreens = jobs.filter(j => ['recruiter_screen', 'hiring_manager', 'panel_onsite', 'offer'].includes(j.status)).length;
-  const hiringManager = jobs.filter(j => ['hiring_manager', 'panel_onsite', 'offer'].includes(j.status)).length;
-  const onsites = jobs.filter(j => ['panel_onsite', 'offer'].includes(j.status)).length;
-  const offers = jobs.filter(j => j.status === 'offer').length;
-
-  const appToRecruiter = applied > 0 ? Math.round((recruiterScreens / applied) * 100) : 0;
-  const recruiterToHM = recruiterScreens > 0 ? Math.round((hiringManager / recruiterScreens) * 100) : 0;
-  const hmToOnsite = hiringManager > 0 ? Math.round((onsites / hiringManager) * 100) : 0;
-  const onsiteToOffer = onsites > 0 ? Math.round((offers / onsites) * 100) : 0;
-
-  document.getElementById('metrics').innerHTML = `
-    <div class="metric">Applied: <span class="metric-value">${applied}</span></div>
-    <div class="metric">App→Screen: <span class="metric-value">${appToRecruiter}%</span></div>
-    <div class="metric">Screen→HM: <span class="metric-value">${recruiterToHM}%</span></div>
-    <div class="metric">HM→Onsite: <span class="metric-value">${hmToOnsite}%</span></div>
-    <div class="metric">Onsite→Offer: <span class="metric-value">${onsiteToOffer}%</span></div>
-  `;
-}
-
-// Modal functionality
-function openModal(jobId) {
-  const job = jobsData.jobs.find(j => j.id === jobId);
-  if (!job) return;
-
-  const nextInterview = getNextInterview(job);
-
-  let interviewsHtml = job.interviews.length > 0
-    ? job.interviews.map(i => `
-        <div class="offer-row">
-          <span class="offer-label">${i.type}</span>
-          <span>${formatDate(i.date)}${i.notes ? ' - ' + i.notes : ''}</span>
-        </div>
-      `).join('')
-    : '<p style="color:#888;">No interviews scheduled</p>';
-
-  let offerHtml = '';
-  if (job.offer) {
-    offerHtml = `
-      <div class="modal-section">
-        <h3>Offer Details</h3>
-        <div class="offer-details">
-          <div class="offer-row"><span class="offer-label">Initial Offer</span><span class="offer-value">${formatSalary(job.offer.initial)}</span></div>
-          ${job.offer.counter ? `<div class="offer-row"><span class="offer-label">Counter</span><span>${formatSalary(job.offer.counter)}</span></div>` : ''}
-          ${job.offer.final ? `<div class="offer-row"><span class="offer-label">Final</span><span class="offer-value">${formatSalary(job.offer.final)}</span></div>` : ''}
-          ${job.offer.bonus ? `<div class="offer-row"><span class="offer-label">Bonus</span><span>${formatSalary(job.offer.bonus)}</span></div>` : ''}
-          ${job.offer.equity ? `<div class="offer-row"><span class="offer-label">Equity</span><span>${job.offer.equity}</span></div>` : ''}
-        </div>
-      </div>
-    `;
-  }
-
-  document.getElementById('modal-body').innerHTML = `
-    <div class="modal-section">
-      <h3>Basic Info</h3>
-      <div class="modal-field"><label>Company</label><span>${job.company}</span></div>
-      <div class="modal-field"><label>Role</label><span>${job.role}</span></div>
-      <div class="modal-field"><label>Salary Range</label><span>${formatSalary(job.salaryMin)} - ${formatSalary(job.salaryMax)}</span></div>
-      <div class="modal-field"><label>Applied</label><span>${formatDate(job.dateApplied)}</span></div>
-      <div class="modal-field"><label>Job URL</label><span><a href="${job.jobUrl}" target="_blank" style="color:#4ecca3;">${job.jobUrl || 'N/A'}</a></span></div>
-      <div class="modal-field"><label>Next Action</label><span>${job.nextAction || 'N/A'}</span></div>
-    </div>
-
-    <div class="modal-section">
-      <h3>Contacts</h3>
-      <div class="modal-field"><label>Recruiter</label><span>${job.recruiterName || 'N/A'} ${job.recruiterEmail ? '(' + job.recruiterEmail + ')' : ''}</span></div>
-      <div class="modal-field"><label>Hiring Manager</label><span>${job.hiringManagerName || 'N/A'} ${job.hiringManagerEmail ? '(' + job.hiringManagerEmail + ')' : ''}</span></div>
-      <div class="modal-field"><label>Referral</label><span>${job.referralContact || 'None'} (${job.referralStatus})</span></div>
-    </div>
-
-    <div class="modal-section">
-      <h3>Interviews</h3>
-      <div class="offer-details">
-        ${interviewsHtml}
-      </div>
-    </div>
-
-    <div class="modal-section">
-      <h3>Interview Prep</h3>
-      <div class="prep-checklist">
-        <div class="prep-item ${job.prepChecklist.companyResearch ? 'done' : 'pending'}">${job.prepChecklist.companyResearch ? '✓' : '○'} Company research</div>
-        <div class="prep-item ${job.prepChecklist.starStories ? 'done' : 'pending'}">${job.prepChecklist.starStories ? '✓' : '○'} STAR stories</div>
-        <div class="prep-item ${job.prepChecklist.questionsReady ? 'done' : 'pending'}">${job.prepChecklist.questionsReady ? '✓' : '○'} Questions ready</div>
-        <div class="prep-item ${job.prepChecklist.technicalPrep ? 'done' : 'pending'}">${job.prepChecklist.technicalPrep ? '✓' : '○'} Technical prep</div>
-      </div>
-    </div>
-
-    ${offerHtml}
-
-    <div class="modal-section">
-      <h3>Notes</h3>
-      <div class="modal-notes">${job.notes || 'No notes yet'}</div>
-    </div>
-
-    <div class="modal-section">
-      <h3>Company Research</h3>
-      <div class="modal-notes">${job.companyResearch || 'No research notes yet'}</div>
-    </div>
-  `;
-
-  document.getElementById('modal').classList.remove('hidden');
-}
-
-function closeModal() {
-  document.getElementById('modal').classList.add('hidden');
-}
-
-// Event listeners
-document.getElementById('modal-close').addEventListener('click', closeModal);
-document.getElementById('modal').addEventListener('click', (e) => {
-  if (e.target.id === 'modal') closeModal();
-});
-
-document.getElementById('search').addEventListener('input', (e) => {
-  activeFilters.search = e.target.value;
-  render();
-});
-
-document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeFilters.status = btn.dataset.filter;
-    render();
-  });
-});
-
-document.getElementById('salary-min').addEventListener('input', (e) => {
-  activeFilters.salaryMin = parseInt(e.target.value) * 1000 || 0;
-  render();
-});
-
-document.getElementById('salary-max').addEventListener('input', (e) => {
-  activeFilters.salaryMax = parseInt(e.target.value) * 1000 || Infinity;
-  render();
-});
-
-// Keyboard shortcut to close modal
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
-});
-
-// Initialize
-async function init() {
-  const hasConfig = await checkConfig();
-  if (hasConfig) {
-    await loadData();
-    initDragDrop();
-  }
-}
-init();
-  </script>
+  <!-- Scripts -->
+  <script src="/storage-adapter.js"></script>
+  <script src="/tracker.js"></script>
 </body>
 </html>

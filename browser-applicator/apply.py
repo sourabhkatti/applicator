@@ -29,40 +29,112 @@ import yaml
 from dotenv import load_dotenv
 
 
-def add_to_tracker(job_url: str, company: str, role: str, agent_result: str = None) -> bool:
-    """
-    Add a successful application to the job tracker.
-
-    Returns True if added successfully, False otherwise.
-    """
+def load_tracker():
+    """Load tracker data from jobs.json."""
     tracker_path = Path(__file__).parent.parent / "tracker" / "jobs.json"
 
     if not tracker_path.exists():
-        # Initialize tracker if it doesn't exist
-        tracker_data = {"settings": {"followUpDays": 2}, "jobs": []}
-    else:
-        try:
-            with open(tracker_path, 'r') as f:
-                tracker_data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Could not read tracker: {e}")
-            return False
+        return {"settings": {"followUpDays": 2, "active_tasks": {}}, "jobs": []}
+
+    try:
+        with open(tracker_path, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Could not read tracker: {e}")
+        return {"settings": {"followUpDays": 2, "active_tasks": {}}, "jobs": []}
+
+
+def save_tracker(tracker_data):
+    """Save tracker data to jobs.json."""
+    tracker_path = Path(__file__).parent.parent / "tracker" / "jobs.json"
+
+    try:
+        with open(tracker_path, 'w') as f:
+            json.dump(tracker_data, f, indent=2)
+        return True
+    except IOError as e:
+        print(f"Warning: Could not write to tracker: {e}")
+        return False
+
+
+def create_active_task(company: str, role: str, job_url: str) -> str:
+    """
+    Create an active task entry in the tracker.
+    Returns the task_id.
+    """
+    tracker_data = load_tracker()
+
+    # Ensure active_tasks exists
+    if 'settings' not in tracker_data:
+        tracker_data['settings'] = {}
+    if 'active_tasks' not in tracker_data['settings']:
+        tracker_data['settings']['active_tasks'] = {}
+
+    task_id = str(uuid.uuid4())
+    tracker_data['settings']['active_tasks'][task_id] = {
+        'task_id': task_id,
+        'company': company,
+        'role': role,
+        'job_url': job_url,
+        'started_at': datetime.now().isoformat() + 'Z',
+        'status': 'running',
+        'progress': 0,
+        'current_step': 'Initializing browser',
+        'total_steps': 0,
+        'error_message': None,
+        'cost': 0.0
+    }
+
+    save_tracker(tracker_data)
+    return task_id
+
+
+def update_task_progress(task_id: str, current_step: str, progress: int):
+    """Update active task progress in tracker."""
+    try:
+        tracker_data = load_tracker()
+        if task_id in tracker_data['settings'].get('active_tasks', {}):
+            tracker_data['settings']['active_tasks'][task_id].update({
+                'current_step': current_step,
+                'progress': progress,
+                'updated_at': datetime.now().isoformat() + 'Z'
+            })
+            save_tracker(tracker_data)
+    except Exception as e:
+        print(f"Warning: Failed to update task progress: {e}")
+
+
+def complete_task(task_id: str, company: str, role: str, job_url: str, agent_result: str = None):
+    """
+    Remove task from active_tasks and add to jobs list.
+    """
+    tracker_data = load_tracker()
+
+    # Remove from active tasks
+    if task_id in tracker_data['settings'].get('active_tasks', {}):
+        del tracker_data['settings']['active_tasks'][task_id]
 
     # Check if job already exists (by URL)
     existing_urls = [job.get("jobUrl", "") for job in tracker_data.get("jobs", [])]
     if job_url in existing_urls:
         print(f"Job already in tracker: {job_url}")
+        save_tracker(tracker_data)
         return True
 
-    # Create new job entry
+    # Create new job entry with unified schema
     today = datetime.now().strftime("%Y-%m-%d")
+    applied_at = datetime.now().isoformat() + "Z"
+
     new_job = {
         "id": str(uuid.uuid4()).upper(),
         "company": company.replace("-", " ").replace("_", " ").title(),
         "role": role,
         "status": "applied",
+        "interview_stage": None,
+        "applied_at": applied_at,
         "dateApplied": today,
-        "nextAction": "Wait for response",
+        "lastActivityDate": today,
+        "followUpBy": None,
         "jobUrl": job_url,
         "salaryMin": None,
         "salaryMax": None,
@@ -73,9 +145,7 @@ def add_to_tracker(job_url: str, company: str, role: str, agent_result: str = No
         "referralContact": None,
         "referralStatus": "none",
         "interviews": [],
-        "lastActivityDate": today,
-        "followUpBy": None,
-        "notes": f"Applied via browser-applicator. {agent_result[:200] if agent_result else ''}".strip(),
+        "notes": f"Applied via browser-applicator on {today}. Awaiting email confirmation.\n\n{agent_result[:200] if agent_result else ''}".strip(),
         "companyResearch": None,
         "prepChecklist": {
             "companyResearch": False,
@@ -83,21 +153,37 @@ def add_to_tracker(job_url: str, company: str, role: str, agent_result: str = No
             "questionsReady": False,
             "technicalPrep": False
         },
-        "offer": None
+        "offer": None,
+        "nextAction": "Wait for response",
+        "email_verified": False,
+        "browser_use_task_id": task_id,
+        "audit_trail": [],
+        "synced": True,
+        "created_at": applied_at,
+        "updated_at": applied_at
     }
 
-    # Add to jobs list
-    tracker_data["jobs"].append(new_job)
+    # Add to jobs list (at beginning)
+    tracker_data['jobs'].insert(0, new_job)
 
-    # Write back to file
+    save_tracker(tracker_data)
+    print(f"✅ Added to tracker: {company} - {role}")
+    return True
+
+
+def error_task(task_id: str, error_message: str):
+    """Mark task as errored."""
     try:
-        with open(tracker_path, 'w') as f:
-            json.dump(tracker_data, f, indent=2)
-        print(f"✓ Added to tracker: {company} - {role}")
-        return True
-    except IOError as e:
-        print(f"Warning: Could not write to tracker: {e}")
-        return False
+        tracker_data = load_tracker()
+        if task_id in tracker_data['settings'].get('active_tasks', {}):
+            tracker_data['settings']['active_tasks'][task_id].update({
+                'status': 'error',
+                'error_message': error_message,
+                'updated_at': datetime.now().isoformat() + 'Z'
+            })
+            save_tracker(tracker_data)
+    except Exception as e:
+        print(f"Warning: Failed to update task error: {e}")
 
 
 def get_api_key() -> str:
@@ -178,7 +264,7 @@ from resume_generator import get_default_resume_path, prepare_resume
 load_dotenv()
 
 
-def setup_logging(job_name: str) -> tuple[logging.Logger, str]:
+def setup_logging(job_name: str, json_mode: bool = False) -> tuple[logging.Logger, str]:
     """Setup logging to file and return logger and log path."""
     log_dir = Path(__file__).parent / "output" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -198,11 +284,12 @@ def setup_logging(job_name: str) -> tuple[logging.Logger, str]:
     fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(fh)
 
-    # Console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter('%(message)s'))
-    logger.addHandler(ch)
+    # Console handler (only if not in JSON mode - to avoid polluting JSON output)
+    if not json_mode:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter('%(message)s'))
+        logger.addHandler(ch)
 
     return logger, str(log_file)
 
@@ -236,7 +323,8 @@ async def apply_to_job(
     job_url: str,
     resume_path: str,
     logger: logging.Logger,
-    config: dict
+    config: dict,
+    json_mode: bool = False
 ) -> dict:
     """
     Apply to a job posting using browser-use.
@@ -247,6 +335,7 @@ async def apply_to_job(
         - role: str (if found)
         - screenshot: str (path to confirmation screenshot)
         - error: str (if failed)
+        - task_id: str (active task ID)
     """
     # Import browser-use here to avoid import errors if not installed
     try:
@@ -258,6 +347,10 @@ async def apply_to_job(
 
     company = extract_company_from_url(job_url)
     logger.info(f"Applying to {company}")
+
+    # Create active task (will show "Unknown Role" initially until we extract from page)
+    task_id = create_active_task(company, "Unknown Role", job_url)
+    logger.info(f"Created active task: {task_id}")
 
     # Get applicant info from config
     try:
@@ -308,9 +401,19 @@ Upload this file for the resume: {prepared_resume}
 ## Step-by-Step Instructions
 
 1. **Navigate**: Go to {job_url}
-2. **Application Tab**: Click "Application" tab if the page shows job description first
 
-3. **CRITICAL - Scan for ALL required fields FIRST**:
+2. **EARLY EXIT CHECK - Email Verification Blocker**:
+   - After page loads, check if you see ANY of these:
+     - "Enter security code" or "Verification code"
+     - "Check your email for a code"
+     - "We've sent you a code"
+   - If you see ANY email verification requirement, immediately STOP and report:
+     "FAILURE: This application requires email verification which cannot be completed automatically."
+   - Do NOT attempt to proceed with such applications
+
+3. **Application Tab**: Click "Application" tab if the page shows job description first
+
+4. **CRITICAL - Scan for ALL required fields FIRST**:
    - Scroll through the ENTIRE form before filling anything
    - Required fields are marked with * (asterisk) or say "required"
    - Note all required fields so you don't miss any
@@ -353,24 +456,54 @@ Upload this file for the resume: {prepared_resume}
 
 12. **Submit**: Click the Submit Application button
 
-13. **CRITICAL - Verify Submission (DO NOT SKIP)**:
-    - After clicking Submit, WAIT 5 seconds for the page to update
+13. **CRITICAL - Verify Submission and Fix ALL Errors (DO NOT SKIP)**:
+    - After clicking Submit, WAIT 8 seconds for the page to fully update
+    - Scroll to TOP of page to check for error messages
     - Then carefully READ the page content to determine if submission succeeded
-    - **SUCCESS indicators** (must see at least one):
-      - "Thank you" or "Thanks for applying" message
-      - "Application received" or "Application submitted" confirmation
-      - A completely new page/screen replacing the form
-      - "We'll be in touch" or "We will review" message
-      - The form disappearing and being replaced by a confirmation message
-    - **FAILURE indicators** (if you see any of these, submission FAILED):
-      - The form is still visible with the same fields
-      - Red error text or validation messages anywhere on the page
-      - "Required" warnings next to unfilled fields
-      - "Please fill out this field" browser tooltips
-      - The page looks exactly the same as before clicking Submit
-      - A banner or toast saying "Please complete required fields"
-    - If you see FAILURE indicators, scroll up to find errors, fix them, and try submitting again
-    - After 3 failed submit attempts, report exactly what errors you see and stop
+
+    - **IMMEDIATE FAILURE - Email Verification**:
+      - If you see "security code", "verification code", "check your email", or "enter code":
+        → Report "FAILURE: Email verification required" and STOP immediately
+
+    - **ERROR RESOLUTION - DO NOT SUBMIT AGAIN UNTIL ALL ERRORS FIXED**:
+      - If you see error banner like "Your form needs corrections" or any red error messages:
+        1. READ AND LIST every single error message on the page
+        2. For EACH error message, find the corresponding field
+        3. Fill/fix that specific field with the correct value
+        4. After fixing ALL errors, scroll through form to verify no errors remain
+        5. ONLY THEN click Submit again
+
+      - Common errors and how to fix them:
+        * "Missing entry for required field: Location" → Fill location field with "San Francisco, California"
+        * "Missing entry for required field: Can you provide proof of authorization" → Select "Yes"
+        * "Missing entry for required field: Will you now or in the future require employer sponsorship" → Select "No"
+        * "Missing entry for required field: [field name]" → Find that field and fill it
+        * Any dropdown showing "Select..." → Click it and choose appropriate option
+        * Any checkbox that says "required" → Check it if appropriate
+
+      - You MUST resolve every single bullet point in error messages before clicking Submit again
+      - After fixing errors, verify by scrolling through form that no red text or error messages remain
+
+    - **SUCCESS indicators** (must see at least one of these):
+      - "Thank you" or "Thanks for applying" or "Application received"
+      - "Application submitted" or "Successfully submitted"
+      - "We'll be in touch" or "We will review" or "We'll contact you"
+      - Form has completely disappeared (replaced with confirmation page)
+      - Page URL changed to a "submitted" or "thank-you" page
+      - A green checkmark or success icon with confirmation text
+      - NO error messages or red text visible anywhere on page
+
+    - **FAILURE indicators** (if ANY of these, submission FAILED):
+      - Email verification code request
+      - Form still visible with same input fields
+      - Red error text or validation messages STILL present after fixes
+      - "Required" warnings next to fields
+      - "Please complete" or "Please fill" messages
+      - Error banner still showing "Your form needs corrections"
+      - Page looks identical to before clicking Submit
+
+    - Maximum 5 submit attempts allowed - fix errors and retry each time
+    - After 5 failed submit attempts, report exact remaining errors and STOP
 
 14. **If Submit Fails**:
     - Read any error messages carefully
@@ -399,18 +532,37 @@ When complete, provide:
         logger.error(f"Failed to initialize LLM: {e}")
         return {"success": False, "error": str(e), "company": company}
 
-    browser = Browser()
+    # Maximum stealth configuration with persistent profile
+    # Use a persistent user data directory to maintain cookies/sessions across runs
+    user_data_dir = Path(__file__).parent / "output" / "sourabh_katti_profile"
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Configure browser with extended timeouts
+    import os
+    # Suppress browser-use logs in JSON mode to avoid polluting JSON output
+    os.environ['BROWSER_USE_LOGGING_LEVEL'] = 'ERROR' if json_mode else 'INFO'
+
+    # Simplest possible local browser configuration
+    browser = Browser(
+        headless=False
+    )
 
     agent = Agent(
         task=task,
         llm=llm,
         browser=browser,
         available_file_paths=[prepared_resume],
+        max_time_seconds=240,  # 4 minutes timeout for entire application
+        max_actions_per_step=30,  # Allow more actions per step for complex forms
     )
 
     try:
         logger.info("Starting browser-use agent...")
+        update_task_progress(task_id, "Running browser automation", 10)
+
         history = await agent.run()
+
+        update_task_progress(task_id, "Processing results", 90)
 
         # Try to take final screenshot if possible
         try:
@@ -434,10 +586,11 @@ When complete, provide:
             # Require explicit confirmation signals - the agent must have seen a confirmation page
             confirmation_signals = ['thank you', 'thanks for applying', 'application received',
                                     'application submitted', 'we will review', "we'll be in touch",
-                                    'successfully submitted', 'has been submitted']
+                                    'successfully submitted', 'has been submitted', 'submitted successfully',
+                                    'success:', 'the application was submitted', 'no longer visible']
             failure_signals = ['not found', 'job not found', 'unable to submit', 'could not',
                               'failed', 'error', 'captcha', 'without the resume',
-                              'missing required', 'validation']
+                              'missing required', 'validation', 'spam', 'failure:']
 
             has_confirmation = any(signal in result_lower for signal in confirmation_signals)
             has_failure = any(signal in result_lower for signal in failure_signals)
@@ -456,16 +609,19 @@ When complete, provide:
             "company": company,
             "role": role,
             "screenshot": str(screenshot_path) if screenshot_path.exists() else None,
-            "agent_result": result
+            "agent_result": result,
+            "task_id": task_id
         }
 
     except Exception as e:
         logger.error(f"Agent error: {e}")
+        error_task(task_id, str(e))
         return {
             "success": False,
             "company": company,
             "error": str(e),
-            "screenshot": str(screenshot_path) if screenshot_path.exists() else None
+            "screenshot": str(screenshot_path) if screenshot_path.exists() else None,
+            "task_id": task_id
         }
 
 
@@ -508,7 +664,7 @@ Examples:
 
     # Setup logging
     company = extract_company_from_url(args.url)
-    logger, log_path = setup_logging(company)
+    logger, log_path = setup_logging(company, json_mode=args.json)
 
     logger.info("Browser Applicator")
     logger.info(f"URL: {args.url}")
@@ -517,15 +673,16 @@ Examples:
     logger.info("-" * 50)
 
     # Run application
-    result = await apply_to_job(args.url, resume_path, logger, config)
+    result = await apply_to_job(args.url, resume_path, logger, config, json_mode=args.json)
     result["log"] = log_path
 
     # Add to tracker if successful
     if result.get("success"):
-        add_to_tracker(
-            job_url=args.url,
+        complete_task(
+            task_id=result.get("task_id"),
             company=result.get("company", company),
             role=result.get("role", "Unknown Role"),
+            job_url=args.url,
             agent_result=result.get("agent_result")
         )
 

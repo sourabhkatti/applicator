@@ -1,0 +1,60 @@
+<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Body -->
+  <ellipse cx="60" cy="70" rx="40" ry="35" fill="#FFD93D"/>
+  <ellipse cx="60" cy="70" rx="40" ry="35" fill="url(#bodyGradient)"/>
+
+  <!-- Belly -->
+  <ellipse cx="60" cy="78" rx="28" ry="22" fill="#FFF3C4"/>
+
+  <!-- Left Wing (flapping up) -->
+  <ellipse cx="24" cy="58" rx="12" ry="18" fill="#FFCC00" transform="rotate(-35 24 58)"/>
+
+  <!-- Right Wing (flapping up) -->
+  <ellipse cx="96" cy="58" rx="12" ry="18" fill="#FFCC00" transform="rotate(35 96 58)"/>
+
+  <!-- Head feather tuft (excited) -->
+  <path d="M55 35 Q60 22 65 35" stroke="#FFCC00" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M48 40 Q53 28 58 40" stroke="#FFCC00" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M62 40 Q67 28 72 40" stroke="#FFCC00" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- Left Eye (focused) -->
+  <circle cx="45" cy="58" r="10" fill="white"/>
+  <circle cx="48" cy="58" r="7" fill="#3D3428"/>
+  <circle cx="50" cy="55" r="2.5" fill="white"/>
+
+  <!-- Right Eye (focused) -->
+  <circle cx="75" cy="58" r="10" fill="white"/>
+  <circle cx="72" cy="58" r="7" fill="#3D3428"/>
+  <circle cx="74" cy="55" r="2.5" fill="white"/>
+
+  <!-- Determined eyebrows -->
+  <path d="M38 48 L52 52" stroke="#3D3428" stroke-width="2" stroke-linecap="round"/>
+  <path d="M82 48 L68 52" stroke="#3D3428" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Beak (slightly open) -->
+  <path d="M55 68 L60 79 L65 68 Z" fill="#FF8A65"/>
+  <path d="M56 70 L60 74 L64 70" fill="#FF7043"/>
+
+  <!-- Feet -->
+  <path d="M48 102 L45 108 M48 102 L48 110 M48 102 L51 108" stroke="#FF8A65" stroke-width="3" stroke-linecap="round"/>
+  <path d="M72 102 L69 108 M72 102 L72 110 M72 102 L75 108" stroke="#FF8A65" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Sweat drop -->
+  <path d="M95 45 Q98 50 95 55 Q92 50 95 45" fill="#6EC6FF"/>
+
+  <!-- Action lines -->
+  <path d="M8 50 L18 55" stroke="#FFB74D" stroke-width="2" stroke-linecap="round"/>
+  <path d="M5 62 L15 62" stroke="#FFB74D" stroke-width="2" stroke-linecap="round"/>
+  <path d="M8 74 L18 69" stroke="#FFB74D" stroke-width="2" stroke-linecap="round"/>
+
+  <path d="M112 50 L102 55" stroke="#FFB74D" stroke-width="2" stroke-linecap="round"/>
+  <path d="M115 62 L105 62" stroke="#FFB74D" stroke-width="2" stroke-linecap="round"/>
+  <path d="M112 74 L102 69" stroke="#FFB74D" stroke-width="2" stroke-linecap="round"/>
+
+  <defs>
+    <radialGradient id="bodyGradient" cx="0.5" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#FFE082"/>
+      <stop offset="100%" stop-color="#FFD93D"/>
+    </radialGradient>
+  </defs>
+</svg>
