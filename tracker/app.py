@@ -200,7 +200,6 @@ def remove_task():
 def batch_apply():
     """Start a batch job application process."""
     import subprocess
-    import tempfile
     import uuid
     from datetime import datetime
 
@@ -210,14 +209,54 @@ def batch_apply():
 
     target = data.get('target', 10)
     urls = data.get('urls', [])
+    use_linkedin_search = data.get('search_linkedin', False) or len(urls) == 0
 
     # Validate target
     if not isinstance(target, int) or target < 1 or target > 50:
         return jsonify({"error": "Target must be between 1 and 50"}), 400
 
-    # Check if URLs provided or need to search
+    # If no URLs provided, run LinkedIn search first
+    if not urls and use_linkedin_search:
+        try:
+            # Run LinkedIn search synchronously (it's quick enough)
+            linkedin_search_path = ROOT_DIR / "auto-applicator" / "linkedin_search.py"
+            urls_output_path = ROOT_DIR / "temp_linkedin_urls.txt"
+
+            # Search for more URLs than target to account for failures
+            search_count = min(target * 2, 50)
+
+            result = subprocess.run(
+                ['python3', str(linkedin_search_path), '--count', str(search_count), '--output', str(urls_output_path)],
+                capture_output=True,
+                text=True,
+                timeout=120,  # 2 minute timeout for search
+                cwd=str(ROOT_DIR)
+            )
+
+            if result.returncode != 0:
+                return jsonify({
+                    "error": f"LinkedIn search failed: {result.stderr[:200]}",
+                    "suggestion": "Please provide job URLs manually"
+                }), 500
+
+            # Read the URLs from output file
+            if urls_output_path.exists():
+                with open(urls_output_path) as f:
+                    urls = [line.strip() for line in f if line.strip().startswith('http')]
+
+            if not urls:
+                return jsonify({
+                    "error": "LinkedIn search found no jobs matching your criteria",
+                    "suggestion": "Try adjusting your search preferences in applicant.yaml or provide URLs manually"
+                }), 404
+
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "LinkedIn search timed out. Please provide URLs manually."}), 504
+        except Exception as e:
+            return jsonify({"error": f"LinkedIn search error: {str(e)}"}), 500
+
     if not urls:
-        return jsonify({"error": "No job URLs provided. LinkedIn search not yet implemented - please provide URLs."}), 400
+        return jsonify({"error": "No job URLs provided. Either paste URLs or enable LinkedIn search."}), 400
 
     try:
         # Write URLs to temp file
