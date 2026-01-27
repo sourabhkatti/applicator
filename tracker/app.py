@@ -196,6 +196,87 @@ def remove_task():
         return jsonify({"error": f"Failed to update: {str(e)}"}), 500
 
 
+@app.route('/api/batch_apply', methods=['POST'])
+def batch_apply():
+    """Start a batch job application process."""
+    import subprocess
+    import tempfile
+    import uuid
+    from datetime import datetime
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    target = data.get('target', 10)
+    urls = data.get('urls', [])
+
+    # Validate target
+    if not isinstance(target, int) or target < 1 or target > 50:
+        return jsonify({"error": "Target must be between 1 and 50"}), 400
+
+    # Check if URLs provided or need to search
+    if not urls:
+        return jsonify({"error": "No job URLs provided. LinkedIn search not yet implemented - please provide URLs."}), 400
+
+    try:
+        # Write URLs to temp file
+        urls_file = ROOT_DIR / "temp_batch_urls.txt"
+        with open(urls_file, 'w') as f:
+            for url in urls:
+                f.write(url + '\n')
+
+        # Create batch task entry in jobs.json
+        batch_id = str(uuid.uuid4())
+        with open(JOBS_PATH, 'r') as f:
+            jobs_data = json.load(f)
+
+        if 'settings' not in jobs_data:
+            jobs_data['settings'] = {}
+        if 'active_tasks' not in jobs_data['settings']:
+            jobs_data['settings']['active_tasks'] = {}
+
+        jobs_data['settings']['active_tasks'][batch_id] = {
+            'task_id': batch_id,
+            'type': 'batch',
+            'company': f'Batch Application',
+            'role': f'{target} jobs',
+            'job_url': None,
+            'started_at': datetime.now().isoformat() + 'Z',
+            'status': 'running',
+            'progress': 0,
+            'current_step': f'Starting batch: 0/{target} complete',
+            'target': target,
+            'completed': 0,
+            'failed': 0,
+            'cost': 0.0
+        }
+
+        with open(JOBS_PATH, 'w') as f:
+            json.dump(jobs_data, f, indent=2)
+
+        # Spawn apply_batch.py as background process
+        apply_batch_path = ROOT_DIR / "apply_batch.py"
+        subprocess.Popen(
+            ['python3', str(apply_batch_path), str(urls_file), str(target)],
+            cwd=str(ROOT_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+
+        return jsonify({
+            "success": True,
+            "batch_id": batch_id,
+            "target": target,
+            "urls_count": len(urls),
+            "message": f"Batch started: applying to {target} jobs from {len(urls)} URLs"
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to start batch: {str(e)}"}), 500
+
+
 def main():
     """Run the server and open the browser."""
     port = 8080

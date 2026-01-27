@@ -1483,6 +1483,95 @@ html, body {
   transform: scale(0.98);
 }
 
+/* Accent Button (Batch Apply) */
+.btn-accent {
+  background-color: #7c3aed;
+  color: white;
+  border: none;
+}
+
+.btn-accent:hover {
+  background-color: #6d28d9;
+}
+
+.btn-accent:active {
+  background-color: #5b21b6;
+}
+
+/* Batch Apply Modal Styles */
+.batch-info {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  background-color: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: var(--radius-md);
+}
+
+.batch-info-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.batch-info-item:not(:last-child) {
+  border-bottom: 1px solid #ede9fe;
+}
+
+.batch-info-icon {
+  font-size: var(--text-base);
+}
+
+.form-hint {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* Batch Progress Card */
+.batch-progress-card {
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: white;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.batch-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.batch-progress-title {
+  font-weight: var(--font-bold);
+  font-size: var(--text-lg);
+}
+
+.batch-progress-stats {
+  display: flex;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  opacity: 0.9;
+}
+
+.batch-progress-bar {
+  height: 8px;
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.batch-progress-fill {
+  height: 100%;
+  background-color: white;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .header-left h1 {

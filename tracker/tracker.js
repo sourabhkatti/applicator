@@ -510,6 +510,73 @@ function setupEventListeners() {
       menu.classList.add('hidden');
     }
   });
+
+  // Batch apply button
+  document.getElementById('batch-apply-btn').addEventListener('click', openBatchApplyModal);
+
+  // Batch apply form submit
+  document.getElementById('batch-apply-form').addEventListener('submit', handleBatchApplySubmit);
+}
+
+// ============================================
+// BATCH APPLY FUNCTIONS
+// ============================================
+
+function openBatchApplyModal() {
+  const overlay = document.getElementById('batch-apply-modal-overlay');
+  const form = document.getElementById('batch-apply-form');
+  form.reset();
+  document.getElementById('batch-target').value = '10';
+  overlay.classList.remove('hidden');
+}
+
+function closeBatchApplyModal() {
+  document.getElementById('batch-apply-modal-overlay').classList.add('hidden');
+}
+
+async function handleBatchApplySubmit(e) {
+  e.preventDefault();
+
+  const target = parseInt(document.getElementById('batch-target').value) || 10;
+  const urlsText = document.getElementById('batch-urls').value.trim();
+
+  // Parse URLs if provided
+  const urls = urlsText
+    ? urlsText.split('\n').map(u => u.trim()).filter(u => u && u.startsWith('http'))
+    : [];
+
+  // Validate
+  if (target < 1 || target > 50) {
+    showError('Please enter a number between 1 and 50');
+    return;
+  }
+
+  // Close modal
+  closeBatchApplyModal();
+
+  // Show loading state
+  console.log('[Tracker] Starting batch apply:', { target, urlCount: urls.length });
+
+  try {
+    const response = await fetch('/api/batch_apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, urls })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      console.log('[Tracker] Batch started:', result);
+      // Refresh to show active tasks
+      await refreshUI();
+    } else {
+      showError(`Failed to start batch: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('[Tracker] Batch apply error:', error);
+    showError('Failed to start batch application. Please try again.');
+  }
 }
 
 // ============================================

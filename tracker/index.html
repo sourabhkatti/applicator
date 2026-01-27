@@ -32,6 +32,15 @@
           </svg>
           Add
         </button>
+        <button class="btn btn-accent" id="batch-apply-btn" title="Apply to multiple jobs">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 4h14M2 9h14M2 14h14"/>
+            <circle cx="15" cy="4" r="1.5" fill="currentColor"/>
+            <circle cx="15" cy="9" r="1.5" fill="currentColor"/>
+            <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
+          </svg>
+          Batch Apply
+        </button>
         <button class="btn btn-icon btn-ghost" id="settings-btn" title="Settings">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="10" cy="10" r="3"/>
@@ -513,6 +522,59 @@
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
             <button type="submit" class="btn btn-primary">Add interview</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Batch Apply Modal -->
+    <div class="modal-overlay hidden" id="batch-apply-modal-overlay">
+      <div class="modal" id="batch-apply-modal">
+        <div class="modal-header">
+          <h2>🚀 Batch apply to jobs</h2>
+          <button class="btn btn-icon btn-ghost modal-close">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 5l10 10M15 5l-10 10"/>
+            </svg>
+          </button>
+        </div>
+
+        <form id="batch-apply-form">
+          <div class="form-group">
+            <label for="batch-target">Number of applications</label>
+            <input type="number" class="input" id="batch-target" min="1" max="50" value="10" required>
+            <p class="form-hint">How many successful applications to submit (max 50)</p>
+          </div>
+
+          <div class="form-group">
+            <label for="batch-urls">Job URLs (optional)</label>
+            <textarea class="input" id="batch-urls" rows="5" placeholder="Paste job URLs here, one per line...&#10;&#10;Leave empty to use LinkedIn search based on your preferences in applicant.yaml"></textarea>
+            <p class="form-hint">If empty, will search LinkedIn using your configured preferences</p>
+          </div>
+
+          <div class="batch-info">
+            <div class="batch-info-item">
+              <span class="batch-info-icon">⏱️</span>
+              <span>Each application takes ~2-5 minutes</span>
+            </div>
+            <div class="batch-info-item">
+              <span class="batch-info-icon">💰</span>
+              <span>Estimated cost: ~$0.20-0.50 per application</span>
+            </div>
+            <div class="batch-info-item">
+              <span class="batch-info-icon">📝</span>
+              <span>Resume is tailored for each job automatically</span>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-accent">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 9l4 4 8-8"/>
+              </svg>
+              Start batch
+            </button>
           </div>
         </form>
       </div>

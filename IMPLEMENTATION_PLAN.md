@@ -145,12 +145,12 @@
 7. Test with small batch (3-5 jobs)
 
 **Verification:**
-- [ ] Button visible in tracker UI
-- [ ] Modal prompts for number of applications
-- [ ] Clicking submit starts batch process
-- [ ] Progress visible in Active Applications section
-- [ ] Can monitor multiple concurrent applications
-- [ ] Completed applications move to tracker jobs list
+- [x] Button visible in tracker UI
+- [x] Modal prompts for number of applications
+- [x] Clicking submit starts batch process
+- [x] Progress visible in Active Applications section
+- [x] Can monitor multiple concurrent applications (via individual task cards)
+- [x] Completed applications move to tracker jobs list
 
 ---
 
