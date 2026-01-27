@@ -127,6 +127,75 @@ def save_jobs():
     return jsonify({"success": True})
 
 
+@app.route('/api/cancel_task', methods=['POST'])
+def cancel_task():
+    """Cancel a running application task."""
+    data = request.get_json()
+    if not data or 'task_id' not in data:
+        return jsonify({"error": "task_id required"}), 400
+
+    task_id = data['task_id']
+
+    # Load jobs.json and update task status
+    if not JOBS_PATH.exists():
+        return jsonify({"error": "No jobs data found"}), 404
+
+    try:
+        with open(JOBS_PATH, 'r') as f:
+            jobs_data = json.load(f)
+
+        active_tasks = jobs_data.get('settings', {}).get('active_tasks', {})
+
+        if task_id not in active_tasks:
+            return jsonify({"error": "Task not found"}), 404
+
+        # Mark as cancelled
+        from datetime import datetime
+        active_tasks[task_id].update({
+            'status': 'cancelled',
+            'error_message': 'Task cancelled by user',
+            'updated_at': datetime.now().isoformat() + 'Z'
+        })
+
+        with open(JOBS_PATH, 'w') as f:
+            json.dump(jobs_data, f, indent=2)
+
+        return jsonify({"success": True, "message": f"Task {task_id} cancelled"})
+
+    except (json.JSONDecodeError, IOError) as e:
+        return jsonify({"error": f"Failed to update: {str(e)}"}), 500
+
+
+@app.route('/api/remove_task', methods=['POST'])
+def remove_task():
+    """Remove a task from active_tasks (cleanup after cancel/error)."""
+    data = request.get_json()
+    if not data or 'task_id' not in data:
+        return jsonify({"error": "task_id required"}), 400
+
+    task_id = data['task_id']
+
+    if not JOBS_PATH.exists():
+        return jsonify({"error": "No jobs data found"}), 404
+
+    try:
+        with open(JOBS_PATH, 'r') as f:
+            jobs_data = json.load(f)
+
+        active_tasks = jobs_data.get('settings', {}).get('active_tasks', {})
+
+        if task_id in active_tasks:
+            del active_tasks[task_id]
+            with open(JOBS_PATH, 'w') as f:
+                json.dump(jobs_data, f, indent=2)
+            return jsonify({"success": True, "message": f"Task {task_id} removed"})
+
+        return jsonify({"error": "Task not found"}), 404
+
+    except (json.JSONDecodeError, IOError) as e:
+        return jsonify({"error": f"Failed to update: {str(e)}"}), 500
+
+
 def main():
     """Run the server and open the browser."""
     port = 8080

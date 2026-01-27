@@ -82,11 +82,29 @@ def create_active_task(company: str, role: str, job_url: str) -> str:
         'current_step': 'Initializing browser',
         'total_steps': 0,
         'error_message': None,
-        'cost': 0.0
+        'cost': 0.0,
+        'input_tokens': 0,
+        'output_tokens': 0
     }
 
     save_tracker(tracker_data)
     return task_id
+
+
+def update_task_cost(task_id: str, cost: float, input_tokens: int = 0, output_tokens: int = 0):
+    """Update the cost for an active task."""
+    try:
+        tracker_data = load_tracker()
+        if task_id in tracker_data['settings'].get('active_tasks', {}):
+            tracker_data['settings']['active_tasks'][task_id].update({
+                'cost': cost,
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens,
+                'updated_at': datetime.now().isoformat() + 'Z'
+            })
+            save_tracker(tracker_data)
+    except Exception as e:
+        print(f"Warning: Failed to update task cost: {e}")
 
 
 def update_task_progress(task_id: str, current_step: str, progress: int):
@@ -104,7 +122,8 @@ def update_task_progress(task_id: str, current_step: str, progress: int):
         print(f"Warning: Failed to update task progress: {e}")
 
 
-def complete_task(task_id: str, company: str, role: str, job_url: str, agent_result: str = None):
+def complete_task(task_id: str, company: str, role: str, job_url: str, agent_result: str = None,
+                   cost: float = 0.0, input_tokens: int = 0, output_tokens: int = 0):
     """
     Remove task from active_tasks and add to jobs list.
     """
@@ -157,6 +176,11 @@ def complete_task(task_id: str, company: str, role: str, job_url: str, agent_res
         "nextAction": "Wait for response",
         "email_verified": False,
         "browser_use_task_id": task_id,
+        "application_cost": cost,
+        "application_tokens": {
+            "input": input_tokens,
+            "output": output_tokens
+        },
         "audit_trail": [],
         "synced": True,
         "created_at": applied_at,
@@ -167,7 +191,8 @@ def complete_task(task_id: str, company: str, role: str, job_url: str, agent_res
     tracker_data['jobs'].insert(0, new_job)
 
     save_tracker(tracker_data)
-    print(f"✅ Added to tracker: {company} - {role}")
+    cost_str = f"${cost:.4f}" if cost > 0 else "N/A"
+    print(f"✅ Added to tracker: {company} - {role} (Cost: {cost_str})")
     return True
 
 
@@ -184,6 +209,48 @@ def error_task(task_id: str, error_message: str):
             save_tracker(tracker_data)
     except Exception as e:
         print(f"Warning: Failed to update task error: {e}")
+
+
+def cancel_task(task_id: str) -> bool:
+    """
+    Mark task as cancelled and remove from active tasks.
+    Returns True if task was found and cancelled, False otherwise.
+    """
+    try:
+        tracker_data = load_tracker()
+        active_tasks = tracker_data['settings'].get('active_tasks', {})
+
+        if task_id not in active_tasks:
+            return False
+
+        # Mark as cancelled (keep in active_tasks briefly so UI can show status)
+        tracker_data['settings']['active_tasks'][task_id].update({
+            'status': 'cancelled',
+            'error_message': 'Task cancelled by user',
+            'updated_at': datetime.now().isoformat() + 'Z'
+        })
+        save_tracker(tracker_data)
+
+        # Remove from active tasks after a brief delay (let UI poll once)
+        # The UI will see 'cancelled' status and can clean up
+        return True
+    except Exception as e:
+        print(f"Warning: Failed to cancel task: {e}")
+        return False
+
+
+def remove_task(task_id: str) -> bool:
+    """Remove a task from active_tasks entirely."""
+    try:
+        tracker_data = load_tracker()
+        if task_id in tracker_data['settings'].get('active_tasks', {}):
+            del tracker_data['settings']['active_tasks'][task_id]
+            save_tracker(tracker_data)
+            return True
+        return False
+    except Exception as e:
+        print(f"Warning: Failed to remove task: {e}")
+        return False
 
 
 def get_api_key() -> str:
@@ -564,6 +631,43 @@ When complete, provide:
 
         update_task_progress(task_id, "Processing results", 90)
 
+        # Extract cost information from browser-use history
+        total_cost = 0.0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        try:
+            # browser-use history object tracks token usage
+            if hasattr(history, 'total_input_tokens'):
+                total_input_tokens = history.total_input_tokens() if callable(history.total_input_tokens) else history.total_input_tokens
+            if hasattr(history, 'total_output_tokens'):
+                total_output_tokens = history.total_output_tokens() if callable(history.total_output_tokens) else history.total_output_tokens
+
+            # Estimate cost based on model (approximate pricing)
+            # OpenRouter Gemini 2.0 Flash: ~$0.10/1M input, ~$0.40/1M output
+            # Anthropic Claude Sonnet: ~$3/1M input, ~$15/1M output
+            provider = config.get("llm_provider", "openrouter")
+            model = config.get("llm_model", "").lower()
+
+            if "gemini" in model:
+                # Google Gemini pricing (very cheap)
+                total_cost = (total_input_tokens * 0.0000001) + (total_output_tokens * 0.0000004)
+            elif "claude" in model or provider == "anthropic":
+                # Anthropic Claude pricing
+                total_cost = (total_input_tokens * 0.000003) + (total_output_tokens * 0.000015)
+            elif "gpt-4" in model:
+                # OpenAI GPT-4 pricing
+                total_cost = (total_input_tokens * 0.00003) + (total_output_tokens * 0.00006)
+            else:
+                # Default estimate
+                total_cost = (total_input_tokens * 0.000001) + (total_output_tokens * 0.000002)
+
+            logger.info(f"Cost estimate: ${total_cost:.4f} ({total_input_tokens} in / {total_output_tokens} out tokens)")
+        except Exception as cost_error:
+            logger.warning(f"Could not extract cost: {cost_error}")
+
+        # Update task with cost information
+        update_task_cost(task_id, total_cost, total_input_tokens, total_output_tokens)
+
         # Try to take final screenshot if possible
         try:
             if hasattr(agent, 'browser_session') and agent.browser_session:
@@ -610,7 +714,10 @@ When complete, provide:
             "role": role,
             "screenshot": str(screenshot_path) if screenshot_path.exists() else None,
             "agent_result": result,
-            "task_id": task_id
+            "task_id": task_id,
+            "cost": total_cost,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens
         }
 
     except Exception as e:
@@ -683,7 +790,10 @@ Examples:
             company=result.get("company", company),
             role=result.get("role", "Unknown Role"),
             job_url=args.url,
-            agent_result=result.get("agent_result")
+            agent_result=result.get("agent_result"),
+            cost=result.get("cost", 0.0),
+            input_tokens=result.get("input_tokens", 0),
+            output_tokens=result.get("output_tokens", 0)
         )
 
     # Output result

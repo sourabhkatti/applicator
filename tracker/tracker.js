@@ -93,28 +93,116 @@ function updateActiveTasksSection(activeTasks) {
 }
 
 function createActiveJobCard(task) {
-  const elapsed = task.started_at ? 
+  const elapsed = task.started_at ?
     Math.floor((Date.now() - new Date(task.started_at).getTime()) / 1000) : 0;
   const elapsedMin = Math.floor(elapsed / 60);
   const elapsedSec = elapsed % 60;
-  
+
+  // Determine status display
+  let statusDisplay = '';
+  if (task.status === 'running') {
+    statusDisplay = '⚡ In progress';
+  } else if (task.status === 'error') {
+    statusDisplay = '❌ Error';
+  } else if (task.status === 'cancelled') {
+    statusDisplay = '⏹ Cancelled';
+  } else {
+    statusDisplay = '✅ Done';
+  }
+
+  // Error message section (only shown on error)
+  const errorSection = task.status === 'error' && task.error_message ? `
+    <div class="active-job-error">
+      <div class="error-message">${escapeHtml(task.error_message)}</div>
+    </div>
+  ` : '';
+
+  // Cost display
+  const costDisplay = task.cost > 0 ? `$${task.cost.toFixed(4)}` : '';
+
+  // Show stop button only for running tasks
+  const showStopButton = task.status === 'running';
+
+  // Show dismiss button for cancelled/error tasks
+  const showDismissButton = task.status === 'cancelled' || task.status === 'error';
+
   return `
-    <div class="active-job-card">
+    <div class="active-job-card ${task.status === 'error' ? 'has-error' : ''} ${task.status === 'cancelled' ? 'has-cancelled' : ''}">
       <div class="active-job-header">
         <div class="active-job-info">
           <h3>${escapeHtml(task.company || 'Unknown Company')}</h3>
           <p>${escapeHtml(task.role || 'Unknown Role')}</p>
         </div>
-        <div class="active-job-status">${task.status === 'running' ? '⚡ In progress' : task.status === 'error' ? '❌ Error' : '✅ Done'}</div>
+        <div class="active-job-meta">
+          ${costDisplay ? `<span class="meta-badge cost-badge">💰 ${costDisplay}</span>` : ''}
+          <span class="active-job-status">${statusDisplay}</span>
+        </div>
       </div>
+      ${errorSection}
       <div class="active-job-progress">
         <div class="progress-text">${escapeHtml(task.current_step || 'Processing...')} • ${elapsedMin}m ${elapsedSec}s</div>
         <div class="progress-bar">
           <div class="progress-fill" style="width: ${task.progress || 0}%"></div>
         </div>
       </div>
+      <div class="active-job-actions">
+        ${showStopButton ? `<button class="btn-cancel" onclick="cancelTask('${task.task_id}')">⏹ Stop</button>` : ''}
+        ${showDismissButton ? `<button class="btn-dismiss" onclick="dismissTask('${task.task_id}')">✕ Dismiss</button>` : ''}
+      </div>
     </div>
   `;
+}
+
+// ============================================
+// TASK ACTIONS
+// ============================================
+
+async function cancelTask(taskId) {
+  try {
+    const response = await fetch('/api/cancel_task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      console.log(`[Tracker] Task ${taskId} cancelled`);
+      // Refresh immediately to show cancelled status
+      await refreshUI();
+    } else {
+      console.error('[Tracker] Cancel failed:', result.error);
+      showError(`Failed to cancel task: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('[Tracker] Cancel error:', error);
+    showError('Failed to cancel task. Please try again.');
+  }
+}
+
+async function dismissTask(taskId) {
+  try {
+    const response = await fetch('/api/remove_task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      console.log(`[Tracker] Task ${taskId} dismissed`);
+      // Refresh to remove from UI
+      await refreshUI();
+    } else {
+      console.error('[Tracker] Dismiss failed:', result.error);
+      showError(`Failed to dismiss task: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('[Tracker] Dismiss error:', error);
+    showError('Failed to dismiss task. Please try again.');
+  }
 }
 
 // ============================================
@@ -273,6 +361,7 @@ function createJobCard(job) {
             <span class="detail-label">Applied</span>
             <span class="detail-value date">${daysText}</span>
           </div>
+          ${job.application_cost ? `<div class="detail-item"><span class="detail-label">Cost</span><span class="detail-value cost">$${job.application_cost.toFixed(4)}</span></div>` : ''}
           ${job.recruiterName ? `<div class="detail-item"><span class="detail-label">Recruiter</span><span class="detail-value">${escapeHtml(job.recruiterName)}</span></div>` : ''}
           ${job.referralStatus === 'received' ? `<div class="detail-item"><span class="detail-label">Referral</span><span class="detail-value referral">✓ ${escapeHtml(job.referralContact || 'Yes')}</span></div>` : ''}
         </div>
@@ -391,7 +480,21 @@ function setupEventListeners() {
   
   // Add interview button
   document.getElementById('add-interview-btn').addEventListener('click', handleAddInterview);
-  
+
+  // Interview form submit
+  document.getElementById('interview-form').addEventListener('submit', handleInterviewFormSubmit);
+
+  // Interview type change (show/hide custom field)
+  document.getElementById('interview-type').addEventListener('change', (e) => {
+    const customGroup = document.getElementById('interview-type-custom-group');
+    if (e.target.value === 'Other') {
+      customGroup.style.display = 'block';
+      document.getElementById('interview-type-custom').focus();
+    } else {
+      customGroup.style.display = 'none';
+    }
+  });
+
   // Stage pill click handler (event delegation)
   document.addEventListener('click', (e) => {
     if (e.target.classList.contains('stage-pill')) {
@@ -669,29 +772,86 @@ function renderInterviewsList(interviews) {
 function handleAddInterview() {
   const job = trackerData.jobs.find(j => j.id === currentDetailJobId);
   if (!job) return;
-  
-  // Prompt for interview details
-  const date = prompt('Interview date and time (YYYY-MM-DD HH:MM):');
-  if (!date) return;
-  
-  const type = prompt('Interview type (e.g., "Recruiter Screen", "Technical Round"):');
-  if (!type) return;
-  
-  const notes = prompt('Notes (optional):') || '';
-  
+
+  // Open interview modal
+  openInterviewModal();
+}
+
+function openInterviewModal() {
+  const overlay = document.getElementById('interview-modal-overlay');
+  const form = document.getElementById('interview-form');
+
+  // Reset form
+  form.reset();
+  document.getElementById('interview-type-custom-group').style.display = 'none';
+
+  // Set default date to tomorrow
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  document.getElementById('interview-date').value = tomorrow.toISOString().split('T')[0];
+
+  // Set default time to 10:00 AM
+  document.getElementById('interview-time').value = '10:00';
+
+  overlay.classList.remove('hidden');
+}
+
+function closeInterviewModal() {
+  const overlay = document.getElementById('interview-modal-overlay');
+  overlay.classList.add('hidden');
+}
+
+function handleInterviewFormSubmit(e) {
+  e.preventDefault();
+
+  const job = trackerData.jobs.find(j => j.id === currentDetailJobId);
+  if (!job) return;
+
+  // Get form values
+  const dateStr = document.getElementById('interview-date').value;
+  const timeStr = document.getElementById('interview-time').value;
+  let type = document.getElementById('interview-type').value;
+  const notes = document.getElementById('interview-notes').value;
+
+  // Handle custom type
+  if (type === 'Other') {
+    const customType = document.getElementById('interview-type-custom').value.trim();
+    if (customType) {
+      type = customType;
+    }
+  }
+
+  // Validate
+  if (!dateStr || !timeStr || !type) {
+    showError('Please fill in all required fields');
+    return;
+  }
+
+  // Create date from date and time
+  const dateTime = new Date(`${dateStr}T${timeStr}:00`);
+  if (isNaN(dateTime.getTime())) {
+    showError('Invalid date or time');
+    return;
+  }
+
   // Add interview
   if (!job.interviews) job.interviews = [];
   job.interviews.push({
-    date: new Date(date).toISOString(),
+    date: dateTime.toISOString(),
     type: type,
     notes: notes
   });
-  
+
   // Sort by date
   job.interviews.sort((a, b) => new Date(a.date) - new Date(b.date));
-  
+
   // Re-render
   renderInterviewsList(job.interviews);
+
+  // Close modal
+  closeInterviewModal();
+
+  console.log('[Tracker] Interview added:', { date: dateTime.toISOString(), type, notes });
 }
 
 function removeInterview(index) {
