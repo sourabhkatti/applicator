@@ -529,6 +529,16 @@ Upload this file for the resume: {prepared_resume}
    - Phone: {applicant['phone']}
    - Location (if asked): {applicant['location']}
 
+   **CRITICAL - Location Combobox Handling (Ashby uses autocomplete dropdowns):**
+   The Location field is a COMBOBOX with autocomplete. You CANNOT just type text - you must SELECT from the dropdown:
+   1. Click on the Location input field
+   2. Type "San Francisco" (partial text to filter)
+   3. WAIT 2 seconds for the dropdown to appear with location suggestions
+   4. Look for a dropdown/listbox with location options
+   5. Click on "San Francisco, California" or similar option from the dropdown
+   6. If no dropdown appears, press Enter or Tab to confirm the typed text
+   7. Verify the Location field now shows a selected value (not just typed text)
+
 5. **Resume Upload**:
    - Find the Resume upload field (usually has "Upload File" button)
    - Use upload_file action with path: {prepared_resume}
@@ -537,31 +547,57 @@ Upload this file for the resume: {prepared_resume}
 
 7. **Work Authorization & Policy Questions (CRITICAL - these are common failure points)**:
 
-   **IMPORTANT: How to click Ashby radio buttons (THESE ARE CUSTOM COMPONENTS):**
-   - Ashby uses custom React radio buttons - clicking spans/labels often doesn't work
-   - For Yes/No button pairs (segmented controls): Click directly on the button element
-   - For radio button lists: You MUST click the actual INPUT element (type="radio"), NOT the span or label
-   - To find the input: Look for elements with role="radio" or input[type="radio"] - they have lower element indices than the visible labels
-   - After clicking, WAIT 2 seconds for the selection to register
-   - Verify the selection shows as active (filled circle, aria-checked="true") before moving on
-   - IF CLICKS DON'T WORK after 2 attempts: Use JavaScript execution to select the radio:
-     document.querySelector('input[name="sponsorship"][value="no"]').click()
-     Or: document.querySelectorAll('input[type="radio"]')[index].click()
+   **ASHBY RADIO BUTTONS - USE JAVASCRIPT (clicking spans/labels does NOT work)**:
+
+   Ashby uses custom React radio components where:
+   - The `<input type="radio">` is hidden inside a `<span class="_container_...">`
+   - The visible label is a SIBLING `<label for="...">` element, NOT a parent
+   - Clicking the label span does NOT trigger React's state update
+   - You MUST click the actual `<input>` element directly
+
+   **USE THE EVALUATE ACTION WITH THIS EXACT JAVASCRIPT:**
+
+   **CRITICAL: Run this SINGLE JavaScript snippet to select ALL radio buttons at once:**
+   ```
+   (function(){{var r=document.querySelectorAll('input[type=radio]');var results=[];for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');var t=lbl?lbl.innerText:'';if(t.includes('do not require sponsorship')){{r[i].click();results.push('Sponsor:No')}}if(t.includes('able to work from the office')){{r[i].click();results.push('Hybrid:Yes')}}if(t.includes('San Francisco')&&t.includes('based')){{r[i].click();results.push('Office:SF')}}}}return results.join(', ')||'No matches';}})()
+   ```
+
+   This script will:
+   1. Find radio with "do not require sponsorship" → click it (No sponsorship needed)
+   2. Find radio with "able to work from the office" → click it (Yes to hybrid)
+   3. Find radio with "San Francisco" AND "based" → click it (SF office)
+
+   **If the above doesn't work, run these individual scripts:**
+
+   For sponsorship (select "No, I do not require sponsorship"):
+   ```
+   (function(){{var r=document.querySelectorAll('input[type=radio]');for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');if(lbl&&lbl.innerText.includes('do not require')){{r[i].click();return 'Selected: '+lbl.innerText.substring(0,50)}}}}return 'Not found';}})()
+   ```
+
+   For hybrid policy (select "Yes, I'm able to work from office"):
+   ```
+   (function(){{var r=document.querySelectorAll('input[type=radio]');for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');if(lbl&&lbl.innerText.includes('able to work from the office')){{r[i].click();return 'Selected: '+lbl.innerText.substring(0,50)}}}}return 'Not found';}})()
+   ```
+
+   For office location (select San Francisco):
+   ```
+   (function(){{var r=document.querySelectorAll('input[type=radio]');for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');if(lbl&&lbl.innerText.includes('San Francisco')){{r[i].click();return 'Selected: '+lbl.innerText.substring(0,50)}}}}return 'Not found';}})()
+   ```
+
+   **IMPORTANT: Always use evaluate action for Ashby radio buttons. Clicking span elements does NOT work.**
 
    **Answer these questions as follows:**
-   - "Are you legally authorized to work in the United States?" → Click {"Yes" if authorized_us else "No"}
-   - "Will you now or in the future require employment visa sponsorship?" → Click the radio button for "{"Yes, I will require [company] to sponsor my employment" if requires_sponsorship else "No, I do not require sponsorship to work in the United States"}"
+   - "Are you legally authorized to work in the United States?" → {"Yes" if authorized_us else "No"} (use click action on Yes/No buttons - these are usually simple buttons, not custom radios)
+   - "Will you now or in the future require employment visa sponsorship?" → {"Yes, I will require [company] to sponsor my employment" if requires_sponsorship else "No, I do not require sponsorship"} (USE JAVASCRIPT ABOVE)
 
    **Hybrid/Remote Work Policy Questions (common on Ashby forms):**
-   - "Are you able to work from the office X days a week?" or similar hybrid questions → Click "Yes, I'm able to work from the office" option (first option usually)
-   - "Which office would you be able to work from?" → Click "San Francisco" or the first listed office location
-   - If asked about relocation: Select "I'm open to relocating" or the SF option
+   - "Are you able to work from the office X days a week?" → USE JAVASCRIPT to select "Yes, I'm able to work from the office"
+   - "Which office would you be able to work from?" → USE JAVASCRIPT to select "San Francisco"
 
-   **After answering each radio button question:**
-   - Scroll the question into full view
-   - Click the option text (not just the radio circle)
-   - Wait 1 second
-   - Visually confirm the radio button is now filled/selected before proceeding
+   **After running the evaluate JavaScript:**
+   - Check the return value - it should say "Selected: ..." for each radio
+   - If it returns "Not found", the page may have different label text - adapt the search string
+   - Wait 2 seconds after each evaluate action for React to update
 
 8. **Custom Questions** (answer ALL that have asterisks or say required):
    - Use the applicant background above to write thoughtful, relevant answers
@@ -599,11 +635,16 @@ Upload this file for the resume: {prepared_resume}
         1. READ AND LIST every single error message on the page
         2. For EACH error message, find the corresponding field
         3. Fill/fix that specific field with the correct value
-        4. After fixing ALL errors, scroll through form to verify no errors remain
-        5. ONLY THEN click Submit again
+        4. **CRITICAL: Ashby forms RESET radio selections on validation failure**
+           Run the all-in-one JavaScript to re-select all radios RIGHT BEFORE submitting:
+           ```
+           (function(){{var r=document.querySelectorAll('input[type=radio]');var results=[];for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');var t=lbl?lbl.innerText:'';if(t.includes('do not require sponsorship')){{r[i].click();results.push('Sponsor:No')}}if(t.includes('able to work from the office')){{r[i].click();results.push('Hybrid:Yes')}}if(t.includes('San Francisco')&&t.includes('based')){{r[i].click();results.push('Office:SF')}}}}return results.join(', ')||'No matches';}})()
+           ```
+        5. After fixing ALL errors AND re-selecting radios, scroll through form to verify
+        6. ONLY THEN click Submit again
 
       - Common errors and how to fix them:
-        * "Missing entry for required field: Location" → Fill location field with "San Francisco, California"
+        * "Missing entry for required field: Location" → Location is a COMBOBOX: type "San Francisco", wait 2s for dropdown, click the suggestion OR press Enter to confirm
         * "Missing entry for required field: Can you provide proof of authorization" → Click "Yes" button
         * "Missing entry for required field: Will you now or in the future require employer sponsorship" → Find the radio button question, click the "No, I do not require sponsorship" text label
         * "Missing entry for required field: [hybrid/office policy question]" → Find the hybrid policy question, click "Yes, I'm able to work from the office 3 days a week" text label
@@ -612,16 +653,14 @@ Upload this file for the resume: {prepared_resume}
         * Any dropdown showing "Select..." → Click it and choose appropriate option
         * Any checkbox that says "required" → Check it if appropriate
 
-      - FOR RADIO BUTTONS THAT DIDN'T REGISTER:
-        1. Scroll the question fully into view
-        2. Find the INPUT element (type="radio") not the span/label, and click IT directly
-        3. If no input element visible, look for the clickable circle/dot element
-        4. Wait 2 seconds
-        5. Look at the radio circle - it should now be filled/solid
-        6. If clicking still fails after 2 attempts, use JavaScript to select:
-           - Find the input element by its value/name attribute
-           - Use: document.querySelector('input[value="..."]').click()
-           - Or: element.checked = true; element.dispatchEvent(new Event('change', {bubbles: true}))
+      - FOR RADIO BUTTONS THAT DIDN'T REGISTER - USE JAVASCRIPT VIA EVALUATE ACTION:
+        1. Ashby radios use `<label for="id">` as SIBLING elements, not parents
+        2. Run this all-in-one script to select sponsorship, hybrid, and office radios:
+           ```
+           (function(){{var r=document.querySelectorAll('input[type=radio]');var results=[];for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');var t=lbl?lbl.innerText:'';if(t.includes('do not require sponsorship')){{r[i].click();results.push('Sponsor:No')}}if(t.includes('able to work from the office')){{r[i].click();results.push('Hybrid:Yes')}}if(t.includes('San Francisco')&&t.includes('based')){{r[i].click();results.push('Office:SF')}}}}return results.join(', ')||'No matches';}})()
+           ```
+        3. The script finds labels via `document.querySelector('label[for="'+r[i].id+'"]')`
+        4. Wait 2 seconds after running for React state to update
 
       - You MUST resolve every single bullet point in error messages before clicking Submit again
       - After fixing errors, verify by scrolling through form that no red text or error messages remain
