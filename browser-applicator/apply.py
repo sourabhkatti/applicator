@@ -22,7 +22,7 @@ import re
 import subprocess
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -76,7 +76,7 @@ def create_active_task(company: str, role: str, job_url: str) -> str:
         'company': company,
         'role': role,
         'job_url': job_url,
-        'started_at': datetime.now().isoformat() + 'Z',
+        'started_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         'status': 'running',
         'progress': 0,
         'current_step': 'Initializing browser',
@@ -100,7 +100,7 @@ def update_task_cost(task_id: str, cost: float, input_tokens: int = 0, output_to
                 'cost': cost,
                 'input_tokens': input_tokens,
                 'output_tokens': output_tokens,
-                'updated_at': datetime.now().isoformat() + 'Z'
+                'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             })
             save_tracker(tracker_data)
     except Exception as e:
@@ -115,7 +115,7 @@ def update_task_progress(task_id: str, current_step: str, progress: int):
             tracker_data['settings']['active_tasks'][task_id].update({
                 'current_step': current_step,
                 'progress': progress,
-                'updated_at': datetime.now().isoformat() + 'Z'
+                'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             })
             save_tracker(tracker_data)
     except Exception as e:
@@ -204,7 +204,7 @@ def error_task(task_id: str, error_message: str):
             tracker_data['settings']['active_tasks'][task_id].update({
                 'status': 'error',
                 'error_message': error_message,
-                'updated_at': datetime.now().isoformat() + 'Z'
+                'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             })
             save_tracker(tracker_data)
     except Exception as e:
@@ -227,7 +227,7 @@ def cancel_task(task_id: str) -> bool:
         tracker_data['settings']['active_tasks'][task_id].update({
             'status': 'cancelled',
             'error_message': 'Task cancelled by user',
-            'updated_at': datetime.now().isoformat() + 'Z'
+            'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         })
         save_tracker(tracker_data)
 
@@ -386,6 +386,40 @@ def extract_company_from_url(url: str) -> str:
     return "unknown"
 
 
+def fetch_role_from_url(url: str) -> str:
+    """Fetch job role/title from the job URL by requesting the page."""
+    import urllib.request
+    import urllib.error
+
+    try:
+        # Quick request to get page title
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8', errors='ignore')[:10000]  # Only read first 10KB
+
+            # Try og:title first (most reliable)
+            og_match = re.search(r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+            if og_match:
+                title = og_match.group(1)
+                # Clean up: often format is "Role - Company" or "Role at Company"
+                role = re.split(r'\s*[-–—@|]\s*', title)[0].strip()
+                if role and len(role) > 2:
+                    return role
+
+            # Try page title
+            title_match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+            if title_match:
+                title = title_match.group(1)
+                role = re.split(r'\s*[-–—@|]\s*', title)[0].strip()
+                if role and len(role) > 2:
+                    return role
+
+    except (urllib.error.URLError, TimeoutError, Exception):
+        pass  # Fail silently, will use "Unknown Role"
+
+    return "Unknown Role"
+
+
 async def apply_to_job(
     job_url: str,
     resume_path: str,
@@ -415,8 +449,12 @@ async def apply_to_job(
     company = extract_company_from_url(job_url)
     logger.info(f"Applying to {company}")
 
-    # Create active task (will show "Unknown Role" initially until we extract from page)
-    task_id = create_active_task(company, "Unknown Role", job_url)
+    # Fetch role from job page
+    role = fetch_role_from_url(job_url)
+    logger.info(f"Role: {role}")
+
+    # Create active task with fetched role
+    task_id = create_active_task(company, role, job_url)
     logger.info(f"Created active task: {task_id}")
 
     # Get applicant info from config
