@@ -535,9 +535,33 @@ Upload this file for the resume: {prepared_resume}
 
 6. **LinkedIn**: Enter {applicant['linkedin']} in LinkedIn/Social Profile field
 
-7. **Work Authorization Questions**:
-   - "Legally authorized to work in US?" → Select {"YES" if authorized_us else "NO"}
-   - "Require visa sponsorship?" → Select {"YES" if requires_sponsorship else "NO"}
+7. **Work Authorization & Policy Questions (CRITICAL - these are common failure points)**:
+
+   **IMPORTANT: How to click Ashby radio buttons (THESE ARE CUSTOM COMPONENTS):**
+   - Ashby uses custom React radio buttons - clicking spans/labels often doesn't work
+   - For Yes/No button pairs (segmented controls): Click directly on the button element
+   - For radio button lists: You MUST click the actual INPUT element (type="radio"), NOT the span or label
+   - To find the input: Look for elements with role="radio" or input[type="radio"] - they have lower element indices than the visible labels
+   - After clicking, WAIT 2 seconds for the selection to register
+   - Verify the selection shows as active (filled circle, aria-checked="true") before moving on
+   - IF CLICKS DON'T WORK after 2 attempts: Use JavaScript execution to select the radio:
+     document.querySelector('input[name="sponsorship"][value="no"]').click()
+     Or: document.querySelectorAll('input[type="radio"]')[index].click()
+
+   **Answer these questions as follows:**
+   - "Are you legally authorized to work in the United States?" → Click {"Yes" if authorized_us else "No"}
+   - "Will you now or in the future require employment visa sponsorship?" → Click the radio button for "{"Yes, I will require [company] to sponsor my employment" if requires_sponsorship else "No, I do not require sponsorship to work in the United States"}"
+
+   **Hybrid/Remote Work Policy Questions (common on Ashby forms):**
+   - "Are you able to work from the office X days a week?" or similar hybrid questions → Click "Yes, I'm able to work from the office" option (first option usually)
+   - "Which office would you be able to work from?" → Click "San Francisco" or the first listed office location
+   - If asked about relocation: Select "I'm open to relocating" or the SF option
+
+   **After answering each radio button question:**
+   - Scroll the question into full view
+   - Click the option text (not just the radio circle)
+   - Wait 1 second
+   - Visually confirm the radio button is now filled/selected before proceeding
 
 8. **Custom Questions** (answer ALL that have asterisks or say required):
    - Use the applicant background above to write thoughtful, relevant answers
@@ -580,11 +604,24 @@ Upload this file for the resume: {prepared_resume}
 
       - Common errors and how to fix them:
         * "Missing entry for required field: Location" → Fill location field with "San Francisco, California"
-        * "Missing entry for required field: Can you provide proof of authorization" → Select "Yes"
-        * "Missing entry for required field: Will you now or in the future require employer sponsorship" → Select "No"
-        * "Missing entry for required field: [field name]" → Find that field and fill it
+        * "Missing entry for required field: Can you provide proof of authorization" → Click "Yes" button
+        * "Missing entry for required field: Will you now or in the future require employer sponsorship" → Find the radio button question, click the "No, I do not require sponsorship" text label
+        * "Missing entry for required field: [hybrid/office policy question]" → Find the hybrid policy question, click "Yes, I'm able to work from the office 3 days a week" text label
+        * "Missing entry for required field: Which of [company]'s offices" → Find the office selection, click "San Francisco" option text
+        * "Missing entry for required field: [field name]" → Scroll to find that field and fill it
         * Any dropdown showing "Select..." → Click it and choose appropriate option
         * Any checkbox that says "required" → Check it if appropriate
+
+      - FOR RADIO BUTTONS THAT DIDN'T REGISTER:
+        1. Scroll the question fully into view
+        2. Find the INPUT element (type="radio") not the span/label, and click IT directly
+        3. If no input element visible, look for the clickable circle/dot element
+        4. Wait 2 seconds
+        5. Look at the radio circle - it should now be filled/solid
+        6. If clicking still fails after 2 attempts, use JavaScript to select:
+           - Find the input element by its value/name attribute
+           - Use: document.querySelector('input[value="..."]').click()
+           - Or: element.checked = true; element.dispatchEvent(new Event('change', {bubbles: true}))
 
       - You MUST resolve every single bullet point in error messages before clicking Submit again
       - After fixing errors, verify by scrolling through form that no red text or error messages remain
@@ -647,10 +684,24 @@ When complete, provide:
     # Suppress browser-use logs in JSON mode to avoid polluting JSON output
     os.environ['BROWSER_USE_LOGGING_LEVEL'] = 'ERROR' if json_mode else 'INFO'
 
-    # Simplest possible local browser configuration
-    browser = Browser(
-        headless=False
-    )
+    # Check for cloud browser option (better anti-detection)
+    use_cloud = os.environ.get('BROWSER_USE_CLOUD', '').lower() == 'true'
+
+    if use_cloud:
+        # Cloud browser has better stealth capabilities
+        browser = Browser(use_cloud=True)
+        logger.info("Using cloud browser for better stealth")
+    else:
+        # Local browser with stealth configuration
+        # Using persistent profile helps with reCAPTCHA trust score
+        browser = Browser(
+            headless=False,
+            user_data_dir=str(user_data_dir),
+            # Slow down interactions to appear more human-like
+            minimum_wait_page_load_time=1.5,
+            wait_for_network_idle_page_load_time=2.5,
+            wait_between_actions=0.5,
+        )
 
     agent = Agent(
         task=task,
