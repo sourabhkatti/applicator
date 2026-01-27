@@ -187,6 +187,7 @@ html, body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .app-card:hover, .job-card:hover {
@@ -250,7 +251,6 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex: 1;
 }
 
 .app-card-header, .job-card-header {
