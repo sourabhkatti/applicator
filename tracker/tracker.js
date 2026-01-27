@@ -516,6 +516,106 @@ function setupEventListeners() {
 
   // Batch apply form submit
   document.getElementById('batch-apply-form').addEventListener('submit', handleBatchApplySubmit);
+
+  // Email sync button
+  document.getElementById('sync-now-btn').addEventListener('click', triggerEmailSync);
+
+  // Update sync status display on load
+  updateEmailSyncStatus();
+}
+
+// ============================================
+// EMAIL SYNC FUNCTIONS
+// ============================================
+
+function updateEmailSyncStatus() {
+  const container = document.getElementById('email-sync-status');
+  const indicator = document.getElementById('sync-indicator');
+  const text = document.getElementById('sync-text');
+
+  const lastSync = settings?.last_email_sync;
+  const syncStatus = settings?.email_sync_status;
+
+  if (syncStatus === 'syncing') {
+    container.classList.add('syncing');
+    container.classList.remove('error');
+    indicator.textContent = '🔄';
+    text.textContent = 'Syncing...';
+    return;
+  }
+
+  container.classList.remove('syncing');
+
+  if (syncStatus === 'error') {
+    container.classList.add('error');
+    indicator.textContent = '⚠️';
+    text.textContent = 'Error';
+    return;
+  }
+
+  container.classList.remove('error');
+  indicator.textContent = '📧';
+
+  if (!lastSync) {
+    text.textContent = '--';
+    return;
+  }
+
+  // Calculate time ago
+  const syncDate = new Date(lastSync);
+  const now = new Date();
+  const diffMs = now - syncDate;
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) {
+    text.textContent = 'Just now';
+  } else if (diffMins < 60) {
+    text.textContent = `${diffMins}m ago`;
+  } else {
+    const diffHours = Math.floor(diffMins / 60);
+    text.textContent = `${diffHours}h ago`;
+  }
+}
+
+async function triggerEmailSync() {
+  const container = document.getElementById('email-sync-status');
+  const indicator = document.getElementById('sync-indicator');
+  const text = document.getElementById('sync-text');
+
+  // Show syncing state
+  container.classList.add('syncing');
+  container.classList.remove('error');
+  indicator.textContent = '🔄';
+  text.textContent = 'Syncing...';
+
+  try {
+    const response = await fetch('/api/trigger_email_sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      console.log('[Tracker] Email sync complete:', result.message);
+      // Refresh to get updated jobs
+      await refreshUI();
+    } else {
+      console.error('[Tracker] Email sync failed:', result.error);
+      container.classList.add('error');
+      indicator.textContent = '⚠️';
+      text.textContent = 'Error';
+    }
+  } catch (error) {
+    console.error('[Tracker] Email sync error:', error);
+    container.classList.add('error');
+    indicator.textContent = '⚠️';
+    text.textContent = 'Error';
+  } finally {
+    container.classList.remove('syncing');
+    // Update status display after a short delay
+    setTimeout(updateEmailSyncStatus, 1000);
+  }
 }
 
 // ============================================

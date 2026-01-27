@@ -316,6 +316,61 @@ def batch_apply():
         return jsonify({"error": f"Failed to start batch: {str(e)}"}), 500
 
 
+@app.route('/api/trigger_email_sync', methods=['POST'])
+def trigger_email_sync():
+    """Manually trigger email sync from AgentMail."""
+    import subprocess
+    from datetime import datetime
+
+    try:
+        # Mark sync as in progress
+        with open(JOBS_PATH, 'r') as f:
+            jobs_data = json.load(f)
+
+        jobs_data.setdefault('settings', {})['email_sync_status'] = 'syncing'
+        jobs_data['settings']['email_sync_started'] = datetime.now().isoformat() + 'Z'
+
+        with open(JOBS_PATH, 'w') as f:
+            json.dump(jobs_data, f, indent=2)
+
+        # Run sync script
+        sync_script = ROOT_DIR / "browser-applicator" / "agentmail_tracker_sync.py"
+        result = subprocess.run(
+            ['python3', str(sync_script), '--once'],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(ROOT_DIR)
+        )
+
+        # Update sync status
+        with open(JOBS_PATH, 'r') as f:
+            jobs_data = json.load(f)
+
+        jobs_data['settings']['email_sync_status'] = 'complete' if result.returncode == 0 else 'error'
+        jobs_data['settings']['last_email_sync'] = datetime.now().isoformat() + 'Z'
+
+        with open(JOBS_PATH, 'w') as f:
+            json.dump(jobs_data, f, indent=2)
+
+        if result.returncode == 0:
+            return jsonify({
+                "success": True,
+                "message": "Email sync completed",
+                "output": result.stdout[-500:] if result.stdout else ""
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": result.stderr[:200] if result.stderr else "Unknown error"
+            }), 500
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Email sync timed out"}), 504
+    except Exception as e:
+        return jsonify({"error": f"Sync failed: {str(e)}"}), 500
+
+
 def main():
     """Run the server and open the browser."""
     port = 8080

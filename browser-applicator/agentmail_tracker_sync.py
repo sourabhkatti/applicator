@@ -160,11 +160,20 @@ def load_sync_state() -> Set[str]:
 
 def save_sync_state(processed_threads: Set[str]):
     """Save set of processed thread IDs."""
+    last_sync = datetime.utcnow().isoformat() + 'Z'
     with open(SYNC_STATE_FILE, 'w') as f:
         json.dump({
             'processed_threads': list(processed_threads),
-            'last_sync': datetime.utcnow().isoformat() + 'Z'
+            'last_sync': last_sync
         }, f, indent=2)
+
+    # Also update jobs.json settings for UI visibility
+    try:
+        tracker_data = load_tracker_jobs()
+        tracker_data.setdefault('settings', {})['last_email_sync'] = last_sync
+        save_tracker_jobs(tracker_data)
+    except Exception as e:
+        print(f"Warning: Could not update tracker sync timestamp: {e}")
 
 
 def job_exists_in_tracker(tracker_data: Dict, company: str, role: str = None) -> bool:

@@ -100,6 +100,42 @@ User says: "Add referral for [company]: [contact name]"
 - Set referralContact
 - Set referralStatus to "requested" or "received"
 
+### Comparing offers
+
+User says: "Compare my offers"
+
+- Read jobs.json
+- Filter for jobs with status="offer"
+- Extract offer details from each job's offer object
+- Format as comparison table with columns:
+  - Company
+  - Role
+  - Base salary (offer.initial or offer.final)
+  - Bonus (offer.bonus)
+  - Equity (offer.equity)
+  - Total comp estimate
+  - Deadline (if offer has deadline field)
+- Handle missing offer data gracefully (show "N/A")
+- If no offers found, suggest checking if jobs need to be moved to offer status
+
+Example output:
+```
+| Company    | Role      | Base     | Bonus  | Equity | Total Est |
+|------------|-----------|----------|--------|--------|-----------|
+| Acme Corp  | Senior PM | $180,000 | $30k   | 0.15%  | $210,000  |
+| Beta Inc   | Lead PM   | $200,000 | $25k   | 0.20%  | $225,000  |
+```
+
+### Declining other offers
+
+User says: "I accepted [company]" or "Decline other offers"
+
+After user accepts one offer:
+- Set accepted offer's status to remain as "offer"
+- Add note: "Accepted on [date]"
+- For all other jobs with status="offer": move to "rejected", add note "Declined offer"
+- Optionally ask: "Should I also withdraw from active interviews?"
+
 ## Metrics to monitor
 
 When user asks about progress, calculate:

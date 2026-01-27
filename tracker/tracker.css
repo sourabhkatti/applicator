@@ -1572,6 +1572,45 @@ html, body {
   transition: width 0.3s ease;
 }
 
+/* Email Sync Status */
+.email-sync-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--bg-base);
+  border: 1px solid var(--bg-sunken);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.sync-indicator {
+  font-size: var(--text-sm);
+}
+
+.sync-text {
+  min-width: 40px;
+}
+
+.email-sync-status.syncing .sync-indicator {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.email-sync-status.error {
+  border-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+.email-sync-status.error .sync-text {
+  color: #dc2626;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .header-left h1 {

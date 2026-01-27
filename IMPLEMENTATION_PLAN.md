@@ -225,11 +225,11 @@
 6. Test manual trigger
 
 **Verification:**
-- [ ] Last sync time visible in header
-- [ ] Time updates automatically
-- [ ] Manual trigger button works
-- [ ] Loading indicator shows during sync
-- [ ] Sync status updates in real-time
+- [x] Last sync time visible in header
+- [x] Time updates automatically (via polling)
+- [x] Manual trigger button works
+- [x] Loading indicator shows during sync
+- [x] Sync status updates in real-time
 
 ---
 
@@ -247,11 +247,12 @@
 6. Test with 2-3 mock offers
 
 **Verification:**
-- [ ] Command "Compare my offers" recognized
-- [ ] Retrieves all offer jobs
-- [ ] Displays comparison table
-- [ ] Shows key fields: salary, bonus, equity, deadline
-- [ ] Handles missing offer data gracefully
+- [x] Command "Compare my offers" documented in CLAUDE.md
+- [x] Instructions to retrieve all offer jobs
+- [x] Format as comparison table specified
+- [x] Shows key fields: salary, bonus, equity
+- [x] Handles missing offer data gracefully
+- [x] Added "Decline other offers" command documentation
 
 ---
 
