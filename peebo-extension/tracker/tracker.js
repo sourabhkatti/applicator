@@ -1,11 +1,17 @@
 // Peebo Tracker Logic
 
+// Browser-use Cloud API configuration
+const BROWSER_USE_API_KEY = 'bu_fkMsZKn_HzIRkjT5gcGCPxhvrDvySfHgA402fEfNavc';
+const BROWSER_USE_API_URL = 'https://api.browser-use.com/api/v2';
+
 // State
 let applications = [];
 let filteredApps = [];
 let editingApp = null;
 let deleteTargetId = null;
 let draggedCard = null;
+let activeTasks = new Map(); // Track active browser-use tasks
+let pollInterval = null;
 
 // DOM Elements
 const searchInput = document.getElementById('search-input');
@@ -23,6 +29,12 @@ const deleteConfirm = document.getElementById('delete-confirm');
 const deleteCancel = document.getElementById('delete-cancel');
 const emptyState = document.getElementById('empty-state');
 const kanbanBoard = document.getElementById('kanban-board');
+
+// Active applications elements
+const activeApplications = document.getElementById('active-applications');
+const activeJobs = document.getElementById('active-jobs');
+const activeCount = document.getElementById('active-count');
+const refreshActive = document.getElementById('refresh-active');
 
 // Stats elements
 const statTotal = document.getElementById('stat-total');
@@ -48,9 +60,11 @@ const counts = {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await loadApplications();
+  await loadActiveTasks();
   setupEventListeners();
   setupDragAndDrop();
   checkUrlParams();
+  startPolling();
 });
 
 // Load applications from storage
@@ -508,3 +522,372 @@ function showToast(message, type = 'info') {
     toast.remove();
   }, 3000);
 }
+
+// ========== Active Tasks (Browser-use Cloud) ==========
+
+// Load active tasks from background service worker
+async function loadActiveTasks() {
+  try {
+    // Get active tasks from background service worker's state
+    const response = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_TASKS' });
+
+    if (response && response.tasks) {
+      activeTasks = new Map(Object.entries(response.tasks));
+      await refreshActiveTasks();
+    }
+  } catch (error) {
+    console.error('Failed to load active tasks:', error);
+  }
+}
+
+// Refresh active tasks by fetching latest status from browser-use API
+async function refreshActiveTasks() {
+  if (activeTasks.size === 0) {
+    activeApplications.classList.add('hidden');
+    return;
+  }
+
+  // Show the active applications section
+  activeApplications.classList.remove('hidden');
+
+  // Update count
+  activeCount.textContent = activeTasks.size;
+
+  // Fetch latest status for each task
+  const taskPromises = Array.from(activeTasks.entries()).map(async ([taskId, task]) => {
+    try {
+      const response = await fetch(`${BROWSER_USE_API_URL}/tasks/${task.browserUseTaskId}`, {
+        headers: {
+          'X-Browser-Use-API-Key': BROWSER_USE_API_KEY
+        }
+      });
+
+      if (response.ok) {
+        const taskData = await response.json();
+        return { taskId, task, taskData };
+      }
+    } catch (error) {
+      console.error(`Failed to fetch task ${taskId}:`, error);
+    }
+    return { taskId, task, taskData: null };
+  });
+
+  const results = await Promise.all(taskPromises);
+  renderActiveTasks(results);
+}
+
+// Render active task cards
+function renderActiveTasks(taskResults) {
+  activeJobs.innerHTML = '';
+
+  if (taskResults.length === 0) {
+    activeJobs.innerHTML = '<div class="active-empty">No active applications right now</div>';
+    return;
+  }
+
+  taskResults.forEach(({ taskId, task, taskData }) => {
+    const card = createActiveJobCard(taskId, task, taskData);
+    activeJobs.appendChild(card);
+  });
+}
+
+// Create an active job card with audit trail
+function createActiveJobCard(taskId, task, taskData) {
+  const card = document.createElement('div');
+  card.className = 'active-job-card';
+
+  // Calculate progress
+  let progress = task.progress || 0;
+  let status = task.status || 'running';
+  let currentStep = 'Initializing...';
+
+  if (taskData) {
+    // Use actual data from browser-use API
+    if (taskData.state === 'completed' || taskData.state === 'success') {
+      progress = 100;
+      status = 'completed';
+      currentStep = 'Application submitted!';
+    } else if (taskData.state === 'failed' || taskData.state === 'error') {
+      status = 'failed';
+      currentStep = 'Application failed';
+    } else if (taskData.steps && taskData.steps.length > 0) {
+      const lastStep = taskData.steps[taskData.steps.length - 1];
+      progress = Math.min(95, (taskData.steps.length / 20) * 100);
+      currentStep = lastStep.description || lastStep.action || 'Working...';
+    }
+  }
+
+  // Calculate elapsed time
+  const elapsed = Math.floor((Date.now() - task.startedAt) / 1000);
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const elapsedStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+
+  // Calculate total cost
+  let totalCost = 0;
+  if (taskData && taskData.steps) {
+    totalCost = taskData.steps.reduce((sum, step) => sum + (parseFloat(step.cost) || 0), 0);
+  }
+
+  card.innerHTML = `
+    <div class="active-job-header">
+      <div class="active-job-info">
+        <h3>${escapeHtml(task.company)}</h3>
+        <p>${escapeHtml(task.jobUrl)}</p>
+      </div>
+      <div class="active-job-meta">
+        <div class="meta-badge">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="6" cy="6" r="5"/>
+            <path d="M6 3v3l2 2"/>
+          </svg>
+          ${elapsedStr}
+        </div>
+        ${totalCost > 0 ? `<div class="meta-badge" style="color: var(--color-success);">$${totalCost.toFixed(3)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="active-progress">
+      <div class="progress-info">
+        <span class="progress-label">${escapeHtml(currentStep)}</span>
+        <span class="progress-percent">${Math.round(progress)}%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: ${progress}%"></div>
+      </div>
+    </div>
+
+    ${taskData && taskData.steps && taskData.steps.length > 0 ? `
+      <div class="audit-trail">
+        <div class="audit-header">
+          <h4>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M2 7h10M2 3h10M2 11h7"/>
+            </svg>
+            Execution timeline
+          </h4>
+          <button class="audit-toggle" data-task-id="${taskId}">
+            <span>Show ${taskData.steps.length} steps</span>
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 5l3 3 3-3"/>
+            </svg>
+          </button>
+        </div>
+        <div class="audit-steps" data-task-id="${taskId}">
+          ${taskData.steps.map((step, index) => createAuditStep(step, index + 1)).join('')}
+        </div>
+      </div>
+    ` : ''}
+  `;
+
+  // Add event listener for audit toggle
+  const toggle = card.querySelector('.audit-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const steps = card.querySelector(`.audit-steps[data-task-id="${taskId}"]`);
+      const isExpanded = steps.classList.contains('expanded');
+
+      if (isExpanded) {
+        steps.classList.remove('expanded');
+        toggle.classList.remove('expanded');
+        toggle.querySelector('span').textContent = `Show ${taskData.steps.length} steps`;
+      } else {
+        steps.classList.add('expanded');
+        toggle.classList.add('expanded');
+        toggle.querySelector('span').textContent = `Hide steps`;
+      }
+    });
+  }
+
+  return card;
+}
+
+// Create an audit step element
+function createAuditStep(step, stepNumber) {
+  const duration = step.duration ? `${step.duration}s` : '-';
+  const cost = step.cost ? `$${parseFloat(step.cost).toFixed(3)}` : '';
+  const actions = step.action || (step.actions ? step.actions.join(', ') : 'action');
+  const description = step.description || '';
+
+  return `
+    <div class="audit-step">
+      <div class="step-number">${stepNumber}</div>
+      <div class="step-content">
+        <div class="step-actions">${escapeHtml(actions)}</div>
+        ${description ? `<div class="step-description">${escapeHtml(description)}</div>` : ''}
+        ${step.screenshot_url ? `
+          <div class="step-screenshot" onclick="openScreenshot('${step.screenshot_url}')">
+            <img src="${step.screenshot_url}" alt="Step ${stepNumber} screenshot" loading="lazy">
+          </div>
+        ` : ''}
+      </div>
+      <div class="step-meta">
+        <div class="step-duration">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
+            <circle cx="5" cy="5" r="4"/>
+            <path d="M5 2v3l1.5 1.5"/>
+          </svg>
+          ${duration}
+        </div>
+        ${cost ? `<div class="step-cost">${cost}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// Open screenshot in modal
+window.openScreenshot = function(url) {
+  const modal = document.createElement('div');
+  modal.className = 'screenshot-modal';
+  modal.innerHTML = `<img src="${url}" alt="Screenshot">`;
+  modal.addEventListener('click', () => modal.remove());
+  document.body.appendChild(modal);
+};
+
+// Start polling for active task updates
+function startPolling() {
+  // Poll every 3 seconds
+  pollInterval = setInterval(async () => {
+    if (activeTasks.size > 0) {
+      await refreshActiveTasks();
+    }
+  }, 3000);
+}
+
+// Stop polling
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+// Listen for messages from background service worker
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'TASK_STARTED') {
+    activeTasks.set(message.taskId, message.task);
+    refreshActiveTasks();
+  } else if (message.type === 'TASK_COMPLETED') {
+    activeTasks.delete(message.taskId);
+    refreshActiveTasks();
+    loadApplications(); // Reload applications to show new one
+  } else if (message.type === 'TASK_FAILED') {
+    activeTasks.delete(message.taskId);
+    refreshActiveTasks();
+  }
+});
+
+// Add refresh button listener
+if (refreshActive) {
+  refreshActive.addEventListener('click', async () => {
+    refreshActive.disabled = true;
+    await refreshActiveTasks();
+    setTimeout(() => {
+      refreshActive.disabled = false;
+    }, 1000);
+  });
+}
+
+// ========== AgentMail Sync Status ==========
+
+// Sync status elements
+const syncIndicator = document.getElementById('sync-indicator');
+const syncText = document.getElementById('sync-text');
+const syncNowBtn = document.getElementById('sync-now-btn');
+
+// Update sync status display
+async function updateSyncStatus() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'GET_SYNC_STATUS' });
+
+    if (!response) {
+      syncIndicator.className = 'sync-indicator not-configured';
+      syncText.textContent = 'Email sync';
+      return;
+    }
+
+    if (!response.isConfigured) {
+      syncIndicator.className = 'sync-indicator not-configured';
+      syncText.textContent = 'Not configured';
+      return;
+    }
+
+    if (response.lastSyncAt) {
+      const lastSync = new Date(response.lastSyncAt);
+      const now = new Date();
+      const diffMs = now - lastSync;
+      const diffMins = Math.floor(diffMs / 60000);
+
+      syncIndicator.className = 'sync-indicator synced';
+
+      if (diffMins < 1) {
+        syncText.textContent = 'Synced just now';
+      } else if (diffMins === 1) {
+        syncText.textContent = 'Synced 1m ago';
+      } else if (diffMins < 60) {
+        syncText.textContent = `Synced ${diffMins}m ago`;
+      } else {
+        const hours = Math.floor(diffMins / 60);
+        syncText.textContent = `Synced ${hours}h ago`;
+      }
+    } else {
+      syncIndicator.className = 'sync-indicator not-configured';
+      syncText.textContent = 'Not synced yet';
+    }
+  } catch (error) {
+    console.error('Failed to get sync status:', error);
+    syncIndicator.className = 'sync-indicator error';
+    syncText.textContent = 'Sync error';
+  }
+}
+
+// Manual sync trigger
+async function triggerManualSync() {
+  syncNowBtn.classList.add('syncing');
+  syncIndicator.className = 'sync-indicator syncing';
+  syncText.textContent = 'Checking emails...';
+
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'SYNC_AGENTMAIL' });
+
+    if (response && response.success) {
+      if (response.updatedCount > 0) {
+        showToast(`Updated ${response.updatedCount} application(s) from email`, 'success');
+        await loadApplications();
+      } else {
+        showToast('No new updates from email', 'info');
+      }
+    } else if (response && response.error) {
+      showToast(`Sync error: ${response.error}`, 'error');
+    }
+
+    await updateSyncStatus();
+  } catch (error) {
+    console.error('Manual sync failed:', error);
+    showToast('Sync failed', 'error');
+  } finally {
+    syncNowBtn.classList.remove('syncing');
+  }
+}
+
+// Setup sync button listener
+if (syncNowBtn) {
+  syncNowBtn.addEventListener('click', triggerManualSync);
+}
+
+// Initial sync status update
+updateSyncStatus();
+
+// Periodically update sync status (every 30 seconds)
+setInterval(updateSyncStatus, 30000);
+
+// Extend message listener to handle APPLICATIONS_UPDATED
+const originalMessageListener = chrome.runtime.onMessage.hasListener;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'APPLICATIONS_UPDATED') {
+    // Refresh applications when AgentMail sync updates them
+    loadApplications();
+    updateSyncStatus();
+    showToast('Applications updated from email', 'info');
+  }
+});

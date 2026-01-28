@@ -1,10 +1,16 @@
 // Peebo Background Service Worker
 // Handles application tracking with browser-use Cloud automation
+// and AgentMail email sync for automatic status updates
 
 // Configuration
 const BROWSER_USE_API_KEY = 'bu_fkMsZKn_HzIRkjT5gcGCPxhvrDvySfHgA402fEfNavc';
 const BROWSER_USE_API_URL = 'https://api.browser-use.com/api/v2';
 const POLL_INTERVAL = 3000; // 3 seconds
+
+// AgentMail Configuration
+const AGENTMAIL_API_URL = 'https://api.agentmail.to/v0';
+const AGENTMAIL_SYNC_INTERVAL = 60; // seconds
+const AGENTMAIL_ALARM_NAME = 'agentmail-sync';
 
 // State
 const activeTasks = new Map();
@@ -53,6 +59,15 @@ async function handleMessage(message, sender) {
     case 'DELETE_APPLICATION':
       return await deleteApplication(message.id);
 
+    case 'GET_ACTIVE_TASKS':
+      return { tasks: Object.fromEntries(activeTasks) };
+
+    case 'SYNC_AGENTMAIL':
+      return await pollAgentMail();
+
+    case 'GET_SYNC_STATUS':
+      return await getSyncStatus();
+
     default:
       throw new Error(`Unknown message type: ${message.type}`);
   }
@@ -69,7 +84,11 @@ async function startApplication(jobUrl) {
     // Create browser-use task
     const taskPayload = {
       url: jobUrl,
-      task: `Apply to this job posting. Fill out the application form with my information and submit it.
+      task: `CRITICAL: You are applying to a job at this EXACT URL: ${jobUrl}
+
+You MUST stay on this URL. Do NOT search for other jobs. Do NOT navigate away. If this URL is not a job application, FAIL immediately.
+
+Fill out the application form with my information and submit it.
 
 My Information:
 - Name: ${applicantData.name || 'Not provided'}
@@ -82,11 +101,13 @@ Resume:
 ${applicantData.resumeText || 'Not provided - please fill in manually if required'}
 
 Instructions:
-1. Navigate to the job application page
+1. You are ALREADY at the job application page: ${jobUrl}
 2. Fill out all required fields with the information above
 3. Upload resume if file upload is available (use resume text otherwise)
 4. Submit the application
-5. Confirm the application was submitted successfully`,
+5. Confirm the application was submitted successfully
+
+CRITICAL: Do NOT search DuckDuckGo. Do NOT navigate to other jobs. Stay on ${jobUrl} only.`,
       max_steps: 50,
       use_vision: true
     };
@@ -110,14 +131,18 @@ Instructions:
     const taskId = result.id || result.task_id || generateId();
 
     // Track this task
-    activeTasks.set(taskId, {
+    const taskData = {
       jobUrl,
       company,
       startedAt: Date.now(),
       status: 'running',
       progress: 10,
       browserUseTaskId: result.id
-    });
+    };
+    activeTasks.set(taskId, taskData);
+
+    // Broadcast task started
+    broadcastToTrackers({ type: 'TASK_STARTED', taskId, task: taskData });
 
     // Start polling for progress
     pollBrowserUseTask(taskId);
@@ -159,6 +184,12 @@ async function pollBrowserUseTask(taskId) {
       // Add to applications
       await addApplicationFromTask(task, status);
 
+      // Broadcast completion
+      broadcastToTrackers({ type: 'TASK_COMPLETED', taskId });
+
+      // Remove from active tasks
+      activeTasks.delete(taskId);
+
       // Show notification
       chrome.notifications.create({
         type: 'basic',
@@ -171,6 +202,12 @@ async function pollBrowserUseTask(taskId) {
       task.status = 'failed';
       task.error = status.error || 'Application failed';
       task.progress = 0;
+
+      // Broadcast failure
+      broadcastToTrackers({ type: 'TASK_FAILED', taskId, error: task.error });
+
+      // Remove from active tasks
+      activeTasks.delete(taskId);
 
       chrome.notifications.create({
         type: 'basic',
@@ -388,4 +425,377 @@ function generateId() {
 chrome.action.onClicked.addListener(async (tab) => {
   // This only fires if default_popup is not set
   // Currently we have popup set, so this won't fire
+});
+
+// Broadcast message to all tracker tabs
+async function broadcastToTrackers(message) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.url && tab.url.includes('tracker/tracker.html')) {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {
+          // Ignore errors for closed tabs
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Failed to broadcast to trackers:', error);
+  }
+}
+
+// ============================================
+// AgentMail Sync Module
+// Polls AgentMail for emails and updates application statuses
+// ============================================
+
+// Start AgentMail sync on extension startup
+async function startAgentMailSync() {
+  const user = await getAgentMailConfig();
+  if (!user || !user.agentmail_inbox_id) {
+    console.log('AgentMail sync: No inbox configured, skipping');
+    return;
+  }
+
+  console.log('AgentMail sync: Starting with inbox', user.agentmail_inbox_id);
+
+  // Set up periodic alarm
+  chrome.alarms.create(AGENTMAIL_ALARM_NAME, {
+    periodInMinutes: AGENTMAIL_SYNC_INTERVAL / 60
+  });
+
+  // Do an initial poll
+  await pollAgentMail();
+}
+
+// Get AgentMail configuration from storage
+async function getAgentMailConfig() {
+  const result = await chrome.storage.local.get(['peeboUser']);
+  return result.peeboUser;
+}
+
+// Poll AgentMail for new messages
+async function pollAgentMail() {
+  try {
+    const user = await getAgentMailConfig();
+    if (!user || !user.agentmail_inbox_id || !user.agentmail_api_key) {
+      return { success: false, error: 'AgentMail not configured' };
+    }
+
+    // Load sync state
+    const stateResult = await chrome.storage.local.get(['agentmailSyncState']);
+    const syncState = stateResult.agentmailSyncState || {
+      last_sync_at: null,
+      processed_message_ids: []
+    };
+
+    console.log('AgentMail sync: Polling for new messages...');
+
+    // Fetch messages from AgentMail
+    const response = await fetch(
+      `${AGENTMAIL_API_URL}/inboxes/${user.agentmail_inbox_id}/threads`,
+      {
+        headers: {
+          'Authorization': `Bearer ${user.agentmail_api_key}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('AgentMail API error:', error);
+      return { success: false, error };
+    }
+
+    const data = await response.json();
+    const threads = data.threads || data.data || [];
+
+    let updatedCount = 0;
+
+    for (const thread of threads) {
+      // Skip already processed threads
+      if (syncState.processed_message_ids.includes(thread.id)) {
+        continue;
+      }
+
+      // Get the latest message in the thread
+      const latestMessage = thread.latest_message || thread;
+      const subject = latestMessage.subject || '';
+      const preview = latestMessage.preview || latestMessage.snippet || '';
+      const fromAddress = latestMessage.from || thread.from || '';
+
+      // Classify the email
+      const classification = classifyEmail(subject, preview);
+
+      if (classification.type !== 'unknown') {
+        // Extract company from sender
+        const company = extractCompanyFromSender(fromAddress);
+
+        // Try to match to an existing application
+        const matched = await matchAndUpdateApplication(company, classification);
+
+        if (matched) {
+          updatedCount++;
+        }
+      }
+
+      // Mark as processed
+      syncState.processed_message_ids.push(thread.id);
+    }
+
+    // Trim processed IDs to last 500 to prevent bloat
+    if (syncState.processed_message_ids.length > 500) {
+      syncState.processed_message_ids = syncState.processed_message_ids.slice(-500);
+    }
+
+    // Update sync state
+    syncState.last_sync_at = new Date().toISOString();
+    await chrome.storage.local.set({ agentmailSyncState: syncState });
+
+    if (updatedCount > 0) {
+      console.log(`AgentMail sync: Updated ${updatedCount} application(s)`);
+      // Broadcast to refresh tracker UI
+      broadcastToTrackers({ type: 'APPLICATIONS_UPDATED' });
+    }
+
+    return { success: true, updatedCount };
+
+  } catch (error) {
+    console.error('AgentMail sync error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Get sync status for UI display
+async function getSyncStatus() {
+  const stateResult = await chrome.storage.local.get(['agentmailSyncState']);
+  const syncState = stateResult.agentmailSyncState || {
+    last_sync_at: null,
+    processed_message_ids: []
+  };
+
+  const user = await getAgentMailConfig();
+  const isConfigured = !!(user && user.agentmail_inbox_id && user.agentmail_api_key);
+
+  return {
+    isConfigured,
+    lastSyncAt: syncState.last_sync_at,
+    processedCount: syncState.processed_message_ids.length
+  };
+}
+
+// Extract company name from email sender address
+// e.g., "Acme Corp Hiring <noreply@ashbyhq.com>" → "Acme Corp"
+function extractCompanyFromSender(fromAddress) {
+  // Try to extract display name before email
+  const displayNameMatch = fromAddress.match(/^(.+?)\s*<[^>]+>$/);
+  if (displayNameMatch) {
+    let displayName = displayNameMatch[1].trim();
+    // Remove common suffixes like "Hiring Team", "Careers", "Jobs"
+    displayName = displayName
+      .replace(/\s*(Hiring|Careers|Jobs|Team|Recruiting|Talent)\s*(Team)?$/i, '')
+      .trim();
+    if (displayName) {
+      return displayName;
+    }
+  }
+
+  // Fallback: extract domain from email
+  const emailMatch = fromAddress.match(/<([^>]+)>/) || fromAddress.match(/([^\s@]+@[^\s@]+)/);
+  if (emailMatch) {
+    const email = emailMatch[1];
+    const domain = email.split('@')[1];
+    if (domain) {
+      // Remove common email service domains
+      if (domain.includes('ashbyhq.com') || domain.includes('greenhouse.io') ||
+          domain.includes('lever.co') || domain.includes('workday.com')) {
+        // These are ATS domains, can't extract company from them
+        return null;
+      }
+      // Extract company from domain (e.g., acme.com → Acme)
+      const company = domain.split('.')[0];
+      return formatCompanyName(company);
+    }
+  }
+
+  return null;
+}
+
+// Classify email based on subject and preview content
+// Returns: { type: 'confirmation'|'rejection'|'interview'|'unknown', confidence: 'high'|'medium'|'low' }
+function classifyEmail(subject, preview) {
+  const content = `${subject} ${preview}`.toLowerCase();
+
+  // Rejection patterns
+  const rejectionPatterns = [
+    'decided not to move forward',
+    'decided to move forward with other candidates',
+    'other candidates',
+    'position has been filled',
+    'no longer available',
+    'not a match',
+    'pursuing other candidates',
+    'will not be moving forward',
+    'unable to offer you',
+    'unfortunately',
+    'regret to inform'
+  ];
+
+  // Interview patterns
+  const interviewPatterns = [
+    'schedule an interview',
+    'like to speak with you',
+    'next steps',
+    'invite you to',
+    'scheduling link',
+    'book a time',
+    'phone screen',
+    'interview request',
+    'would love to chat',
+    'excited to meet',
+    'discuss the role'
+  ];
+
+  // Confirmation patterns
+  const confirmationPatterns = [
+    'thank you for applying',
+    'thanks for applying',
+    'received your application',
+    'we\'ve received your application',
+    'application received',
+    'thank you for your application',
+    'application has been received',
+    'appreciate your interest',
+    'application was submitted'
+  ];
+
+  // Check rejection first (highest priority - don't want to miss these)
+  for (const pattern of rejectionPatterns) {
+    if (content.includes(pattern)) {
+      return { type: 'rejection', confidence: 'high' };
+    }
+  }
+
+  // Check interview patterns
+  for (const pattern of interviewPatterns) {
+    if (content.includes(pattern)) {
+      return { type: 'interview', confidence: 'high' };
+    }
+  }
+
+  // Check confirmation patterns
+  for (const pattern of confirmationPatterns) {
+    if (content.includes(pattern)) {
+      return { type: 'confirmation', confidence: 'high' };
+    }
+  }
+
+  return { type: 'unknown', confidence: 'low' };
+}
+
+// Match email to application and update status
+async function matchAndUpdateApplication(company, classification) {
+  if (!company) return false;
+
+  const result = await chrome.storage.local.get(['applications']);
+  const applications = result.applications || [];
+
+  // Normalize company name for matching
+  const normalizedCompany = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // Find matching application
+  const matchIndex = applications.findIndex(app => {
+    const appCompany = (app.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return appCompany.includes(normalizedCompany) || normalizedCompany.includes(appCompany);
+  });
+
+  if (matchIndex === -1) {
+    console.log(`AgentMail sync: No matching application for company "${company}"`);
+    return false;
+  }
+
+  const app = applications[matchIndex];
+  const timestamp = new Date().toISOString().split('T')[0];
+  let updated = false;
+  let notificationTitle = '';
+  let notificationMessage = '';
+
+  switch (classification.type) {
+    case 'confirmation':
+      if (!app.email_verified) {
+        app.email_verified = true;
+        app.notes = (app.notes || '') + `\n✅ Email confirmation received on ${timestamp}`;
+        app.updated_at = new Date().toISOString();
+        notificationTitle = 'Application Confirmed';
+        notificationMessage = `✅ ${app.company} confirmed your application`;
+        updated = true;
+      }
+      break;
+
+    case 'rejection':
+      if (app.status !== 'rejected') {
+        app.status = 'rejected';
+        app.notes = (app.notes || '') + `\n📧 Rejection received on ${timestamp}`;
+        app.updated_at = new Date().toISOString();
+        notificationTitle = 'Application Update';
+        notificationMessage = `📧 Update from ${app.company} - Application closed`;
+        updated = true;
+      }
+      break;
+
+    case 'interview':
+      if (app.status !== 'interviewing') {
+        app.status = 'interviewing';
+        app.interview_stage = 'recruiter_screen';
+        // Add placeholder interview
+        app.interviews = app.interviews || [];
+        app.interviews.push({
+          date: null, // TBD
+          type: 'Interview',
+          notes: `Detected from email on ${timestamp}`
+        });
+        app.notes = (app.notes || '') + `\n🎉 Interview request received on ${timestamp}`;
+        app.updated_at = new Date().toISOString();
+        notificationTitle = 'Interview Request!';
+        notificationMessage = `🎉 ${app.company} wants to schedule an interview!`;
+        updated = true;
+      }
+      break;
+  }
+
+  if (updated) {
+    applications[matchIndex] = app;
+    await chrome.storage.local.set({ applications });
+
+    // Show notification
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('assets/mascot/peebo-icon-128.png'),
+      title: notificationTitle,
+      message: notificationMessage
+    });
+
+    console.log(`AgentMail sync: Updated ${app.company} → ${classification.type}`);
+  }
+
+  return updated;
+}
+
+// Handle alarm events
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === AGENTMAIL_ALARM_NAME) {
+    await pollAgentMail();
+  }
+});
+
+// Initialize AgentMail sync when extension starts
+chrome.runtime.onStartup.addListener(() => {
+  startAgentMailSync();
+});
+
+// Also start on install/update
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install' || details.reason === 'update') {
+    startAgentMailSync();
+  }
 });

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="tracker.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="tracker-container">
@@ -32,6 +32,16 @@
           </svg>
           Add
         </button>
+        <div class="sync-status" id="sync-status">
+          <span class="sync-indicator" id="sync-indicator"></span>
+          <span class="sync-text" id="sync-text">Email sync</span>
+          <button class="btn btn-sm btn-ghost" id="sync-now-btn" title="Check emails now">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M1 7a6 6 0 0112 0M13 7a6 6 0 01-12 0"/>
+              <path d="M1 3v4h4M13 11V7H9"/>
+            </svg>
+          </button>
+        </div>
         <button class="btn btn-icon btn-ghost" id="settings-btn" title="Settings">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="10" cy="10" r="3"/>
@@ -40,6 +50,28 @@
         </button>
       </div>
     </header>
+
+    <!-- Active Applications (In Progress) -->
+    <div class="active-applications hidden" id="active-applications">
+      <div class="active-header">
+        <div class="active-title">
+          <div class="pulse-indicator"></div>
+          <h2>In application now</h2>
+          <span class="active-count" id="active-count">0</span>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="refresh-active">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 8a6 6 0 0112 0M14 8a6 6 0 01-12 0"/>
+            <path d="M2 4v4h4M14 12V8h-4"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="active-jobs" id="active-jobs">
+        <!-- Active job cards inserted here -->
+      </div>
+    </div>
 
     <!-- Stats Bar -->
     <div class="stats-bar">
