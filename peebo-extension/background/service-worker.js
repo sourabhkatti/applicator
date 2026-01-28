@@ -626,19 +626,27 @@ function extractCompanyFromSender(fromAddress) {
 function classifyEmail(subject, preview) {
   const content = `${subject} ${preview}`.toLowerCase();
 
-  // Rejection patterns
+  // Rejection patterns (more flexible matching)
   const rejectionPatterns = [
     'decided not to move forward',
-    'decided to move forward with other candidates',
-    'other candidates',
+    'decided to move forward with',  // Usually means other candidates
+    'move forward with other',
+    'we have filled this position',
     'position has been filled',
+    'filled this position',
     'no longer available',
+    'no longer considering',
     'not a match',
     'pursuing other candidates',
     'will not be moving forward',
+    'not be moving forward',
     'unable to offer you',
     'unfortunately',
-    'regret to inform'
+    'regret to inform',
+    'not selected',
+    'chosen not to proceed',
+    'decided not to proceed',
+    'will not be proceeding'
   ];
 
   // Interview patterns
