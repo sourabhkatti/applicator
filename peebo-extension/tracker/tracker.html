@@ -204,6 +204,14 @@
             <textarea class="input" id="app-notes" rows="3" placeholder="Any notes about this application..."></textarea>
           </div>
 
+          <!-- Email links section (visible when status changed via email) -->
+          <div class="form-group" id="email-links-section" style="display: none;">
+            <label class="form-label">Related emails</label>
+            <div class="email-links-container" id="email-links-container">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
             <button type="submit" class="btn btn-primary" id="modal-save">Save</button>

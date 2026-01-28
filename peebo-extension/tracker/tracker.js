@@ -4,6 +4,22 @@
 const BROWSER_USE_API_KEY = 'bu_fkMsZKn_HzIRkjT5gcGCPxhvrDvySfHgA402fEfNavc';
 const BROWSER_USE_API_URL = 'https://api.browser-use.com/api/v2';
 
+// AgentMail Console URL helper
+// Uses inbox_id (UUID) if available for more reliable URLs
+function getAgentMailThreadUrl(app, threadIdField = 'status_email_thread_id') {
+  const threadId = app[threadIdField];
+  if (!threadId) return null;
+
+  // Use inbox_id UUID if available (more reliable)
+  const inboxId = app.email_inbox_id;
+  if (inboxId) {
+    return `https://console.agentmail.to/inboxes/${inboxId}/threads/${threadId}`;
+  }
+
+  // Fallback to email address format
+  return `https://console.agentmail.to/inboxes/applicator@agentmail.to/threads/${threadId}`;
+}
+
 // State
 let applications = [];
 let filteredApps = [];
@@ -263,8 +279,9 @@ function getStatusInfo(app) {
   // For rejected status
   if (status === 'rejected') {
     const reason = app.rejection_reason || extractReasonFromNotes(app.notes, 'rejection');
-    const emailLink = app.status_email_thread_id ?
-      `<a href="https://console.agentmail.to/inbox/applicator@agentmail.to/thread/${app.status_email_thread_id}" target="_blank" class="email-link" title="View email">
+    const threadUrl = getAgentMailThreadUrl(app, 'status_email_thread_id');
+    const emailLink = threadUrl ?
+      `<a href="${threadUrl}" target="_blank" class="email-link" title="View rejection email">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="1" y="2" width="10" height="8" rx="1"/>
           <path d="M1 3l5 4 5-4"/>
@@ -283,8 +300,9 @@ function getStatusInfo(app) {
   if (status === 'interviewing') {
     const stage = app.interview_stage || 'Interview scheduled';
     const stageLabel = formatInterviewStage(stage);
-    const emailLink = app.status_email_thread_id ?
-      `<a href="https://console.agentmail.to/inbox/applicator@agentmail.to/thread/${app.status_email_thread_id}" target="_blank" class="email-link" title="View email">
+    const threadUrl = getAgentMailThreadUrl(app, 'status_email_thread_id');
+    const emailLink = threadUrl ?
+      `<a href="${threadUrl}" target="_blank" class="email-link" title="View interview request email">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="1" y="2" width="10" height="8" rx="1"/>
           <path d="M1 3l5 4 5-4"/>
@@ -538,6 +556,43 @@ function openEditModal(app) {
   document.getElementById('app-status').value = app.status;
   document.getElementById('app-salary').value = app.salary_range || '';
   document.getElementById('app-notes').value = app.notes || '';
+
+  // Populate email links section
+  const emailLinksSection = document.getElementById('email-links-section');
+  const emailLinksContainer = document.getElementById('email-links-container');
+  emailLinksContainer.innerHTML = '';
+
+  const emailLinks = [];
+
+  // Status change email (rejection or interview)
+  const statusThreadUrl = getAgentMailThreadUrl(app, 'status_email_thread_id');
+  if (statusThreadUrl) {
+    const label = app.status === 'rejected' ? 'Rejection email' :
+                  app.status === 'interviewing' ? 'Interview request email' : 'Status change email';
+    emailLinks.push({ url: statusThreadUrl, label });
+  }
+
+  // Confirmation email (separate from status change)
+  const confirmationThreadUrl = getAgentMailThreadUrl(app, 'confirmation_email_thread_id');
+  if (confirmationThreadUrl) {
+    emailLinks.push({ url: confirmationThreadUrl, label: 'Confirmation email' });
+  }
+
+  if (emailLinks.length > 0) {
+    emailLinksSection.style.display = 'block';
+    emailLinksContainer.innerHTML = emailLinks.map(link => `
+      <a href="${link.url}" target="_blank" class="email-link-row">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1" y="3" width="14" height="10" rx="1"/>
+          <path d="M1 4l7 5 7-5"/>
+        </svg>
+        <span class="email-link-label">${escapeHtml(link.label)}</span>
+        <span class="email-link-external">↗</span>
+      </a>
+    `).join('');
+  } else {
+    emailLinksSection.style.display = 'none';
+  }
 
   modalOverlay.classList.remove('hidden');
 }

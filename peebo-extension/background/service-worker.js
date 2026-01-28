@@ -525,6 +525,8 @@ async function pollAgentMail() {
     for (const thread of threads) {
       // API returns thread_id, not id
       const threadId = thread.thread_id || thread.id;
+      // Also get inbox_id for constructing console URL (it's a UUID, not the email)
+      const inboxId = thread.inbox_id;
 
       // Skip already processed threads
       if (syncState.processed_message_ids.includes(threadId)) {
@@ -539,6 +541,7 @@ async function pollAgentMail() {
       const fromAddress = senders[0] || thread.from || '';
 
       console.log(`AgentMail sync: Processing thread from "${fromAddress}" - "${subject}"`);
+      console.log(`AgentMail sync: Thread ID: ${threadId}, Inbox ID: ${inboxId}`);
 
       // Classify the email
       const classification = classifyEmail(subject, preview);
@@ -549,8 +552,8 @@ async function pollAgentMail() {
         const company = extractCompanyFromSender(fromAddress);
         console.log(`AgentMail sync: Extracted company: "${company}"`);
 
-        // Try to match to an existing application (pass threadId for email link)
-        const matched = await matchAndUpdateApplication(company, classification, subject, preview, threadId);
+        // Try to match to an existing application (pass threadId and inboxId for email link)
+        const matched = await matchAndUpdateApplication(company, classification, subject, preview, threadId, inboxId);
 
         if (matched) {
           updatedCount++;
@@ -767,8 +770,8 @@ function extractRejectionReason(preview) {
 }
 
 // Match email to application and update status
-// threadId is stored to create a direct link to the email that caused the status change
-async function matchAndUpdateApplication(company, classification, emailSubject = '', emailPreview = '', threadId = null) {
+// threadId and inboxId are stored to create a direct link to the email that caused the status change
+async function matchAndUpdateApplication(company, classification, emailSubject = '', emailPreview = '', threadId = null, inboxId = null) {
   if (!company) {
     console.log('AgentMail sync: Cannot match - no company extracted');
     return false;
@@ -807,12 +810,14 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         app.notes = (app.notes || '') + `\n✅ [${timestamp}] Email confirmation received`;
         app.updated_at = new Date().toISOString();
         if (threadId) app.confirmation_email_thread_id = threadId;
+        if (inboxId) app.email_inbox_id = inboxId;
         notificationTitle = 'Application Confirmed';
         notificationMessage = `✅ ${app.company} confirmed your application`;
         updated = true;
       } else if (threadId && !app.confirmation_email_thread_id) {
         // Backfill thread ID if missing (for reprocessing)
         app.confirmation_email_thread_id = threadId;
+        if (inboxId) app.email_inbox_id = inboxId;
         updated = true;
         console.log(`AgentMail sync: Backfilled confirmation thread ID for ${app.company}`);
       }
@@ -826,8 +831,9 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         app.rejection_reason = reason;
         app.notes = (app.notes || '') + `\n❌ [${timestamp}] Rejection: ${reason}`;
         app.updated_at = new Date().toISOString();
-        // Store thread ID for direct email link
+        // Store thread ID and inbox ID for direct email link
         if (threadId) app.status_email_thread_id = threadId;
+        if (inboxId) app.email_inbox_id = inboxId;
         notificationTitle = 'Application Update';
         notificationMessage = `📧 ${app.company} - Application not moving forward`;
         updated = true;
@@ -835,6 +841,7 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
       } else if (threadId && !app.status_email_thread_id) {
         // Backfill thread ID if missing (for reprocessing)
         app.status_email_thread_id = threadId;
+        if (inboxId) app.email_inbox_id = inboxId;
         // Also backfill rejection reason if missing
         if (!app.rejection_reason) {
           app.rejection_reason = extractRejectionReason(emailPreview);
@@ -857,8 +864,9 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         });
         app.notes = (app.notes || '') + `\n🎉 [${timestamp}] Interview request received!`;
         app.updated_at = new Date().toISOString();
-        // Store thread ID for direct email link
+        // Store thread ID and inbox ID for direct email link
         if (threadId) app.status_email_thread_id = threadId;
+        if (inboxId) app.email_inbox_id = inboxId;
         notificationTitle = 'Interview Request!';
         notificationMessage = `🎉 ${app.company} wants to schedule an interview!`;
         updated = true;
@@ -866,6 +874,7 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
       } else if (threadId && !app.status_email_thread_id) {
         // Backfill thread ID if missing (for reprocessing)
         app.status_email_thread_id = threadId;
+        if (inboxId) app.email_inbox_id = inboxId;
         updated = true;
         console.log(`AgentMail sync: Backfilled interview thread ID for ${app.company}`);
       }
