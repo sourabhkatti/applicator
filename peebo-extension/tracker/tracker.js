@@ -401,14 +401,64 @@ function closeModal() {
   editingApp = null;
 }
 
+// Validate job URL - must be a specific job posting, not generic careers page
+function isValidJobUrl(url) {
+  if (!url) return false;
+
+  const lowerUrl = url.toLowerCase();
+
+  // Must have a path beyond just /careers or /jobs
+  const genericPatterns = [
+    /^https?:\/\/[^\/]+\/careers\/?$/,
+    /^https?:\/\/[^\/]+\/jobs\/?$/,
+    /^https?:\/\/[^\/]+\/?$/
+  ];
+
+  for (const pattern of genericPatterns) {
+    if (pattern.test(lowerUrl)) return false;
+  }
+
+  // Valid ATS URLs (these are always specific job postings)
+  const validAtsPatterns = [
+    'jobs.ashbyhq.com',
+    'job-boards.greenhouse.io',
+    'boards.greenhouse.io',
+    'jobs.lever.co',
+    'myworkdayjobs.com'
+  ];
+
+  for (const pattern of validAtsPatterns) {
+    if (lowerUrl.includes(pattern)) return true;
+  }
+
+  // For other URLs, check if they have a job ID or specific path
+  const hasJobId = /\/\d+|\/[a-f0-9-]{20,}|\/job\/|\/position\//i.test(url);
+  return hasJobId;
+}
+
 // Handle form submit
 async function handleFormSubmit(e) {
   e.preventDefault();
 
+  const jobUrl = document.getElementById('app-url').value.trim();
+
+  // Validate job URL
+  if (!jobUrl) {
+    alert('Job URL is required. Please enter the exact URL of the job posting.');
+    document.getElementById('app-url').focus();
+    return;
+  }
+
+  if (!isValidJobUrl(jobUrl)) {
+    alert('Please enter a specific job posting URL, not a generic careers page.\n\nValid examples:\n• https://jobs.ashbyhq.com/company/job-id\n• https://job-boards.greenhouse.io/company/jobs/123\n• https://jobs.lever.co/company/job-id');
+    document.getElementById('app-url').focus();
+    return;
+  }
+
   const formData = {
     company: document.getElementById('app-company').value.trim(),
     role: document.getElementById('app-role').value.trim(),
-    job_url: document.getElementById('app-url').value.trim() || null,
+    job_url: jobUrl,
     status: document.getElementById('app-status').value,
     salary_range: document.getElementById('app-salary').value.trim() || null,
     notes: document.getElementById('app-notes').value.trim() || null,

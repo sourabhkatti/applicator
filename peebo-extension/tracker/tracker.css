@@ -967,3 +967,11 @@ html, body {
     transform: translateX(-50%) translateY(20px);
   }
 }
+
+/* Form hints */
+.form-hint {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-top: var(--space-1);
+}
