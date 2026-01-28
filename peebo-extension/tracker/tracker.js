@@ -138,17 +138,22 @@ function createAppCard(app) {
   card.dataset.id = app.id;
   card.draggable = true;
 
-  const formattedDate = formatDate(app.applied_at);
+  // Support both field name formats (applied_at/dateApplied, role/position, job_url/jobUrl)
+  const appliedDate = app.applied_at || app.dateApplied;
+  const role = app.role || app.position || '';
+  const jobUrl = app.job_url || app.jobUrl;
+
+  const formattedDate = formatDate(appliedDate);
 
   card.innerHTML = `
     <div class="app-card-header">
       <div>
         <h3 class="app-company">${escapeHtml(app.company)}</h3>
-        <p class="app-role">${escapeHtml(app.role)}</p>
+        <p class="app-role">${escapeHtml(role)}</p>
       </div>
       <div class="app-card-actions">
-        ${app.job_url ? `
-          <a href="${escapeHtml(app.job_url)}" target="_blank" class="btn btn-icon btn-ghost" title="Open job posting">
+        ${jobUrl ? `
+          <a href="${escapeHtml(jobUrl)}" target="_blank" class="btn btn-icon btn-ghost" title="Open job posting">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M6 3H4a1 1 0 00-1 1v8a1 1 0 001 1h8a1 1 0 001-1v-2"/>
               <path d="M9 2h5v5"/>
@@ -350,11 +355,12 @@ function handleSearch(e) {
 function filterApps(apps, query) {
   if (!query) return [...apps];
 
-  return apps.filter(app =>
-    app.company.toLowerCase().includes(query) ||
-    app.role.toLowerCase().includes(query) ||
-    (app.notes && app.notes.toLowerCase().includes(query))
-  );
+  return apps.filter(app => {
+    const role = app.role || app.position || '';
+    return app.company.toLowerCase().includes(query) ||
+      role.toLowerCase().includes(query) ||
+      (app.notes && app.notes.toLowerCase().includes(query));
+  });
 }
 
 // Open add modal
@@ -373,8 +379,8 @@ function openEditModal(app) {
 
   document.getElementById('app-id').value = app.id;
   document.getElementById('app-company').value = app.company;
-  document.getElementById('app-role').value = app.role;
-  document.getElementById('app-url').value = app.job_url || '';
+  document.getElementById('app-role').value = app.role || app.position || '';
+  document.getElementById('app-url').value = app.job_url || app.jobUrl || '';
   document.getElementById('app-status').value = app.status;
   document.getElementById('app-salary').value = app.salary_range || '';
   document.getElementById('app-notes').value = app.notes || '';
