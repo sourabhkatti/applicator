@@ -12,6 +12,10 @@ const AGENTMAIL_API_URL = 'https://api.agentmail.to/v0';
 const AGENTMAIL_SYNC_INTERVAL = 60; // seconds
 const AGENTMAIL_ALARM_NAME = 'agentmail-sync';
 
+// Default AgentMail credentials (auto-configured for all users)
+const AGENTMAIL_DEFAULT_INBOX = 'applicator@agentmail.to';
+const AGENTMAIL_DEFAULT_API_KEY = 'am_c036eda64cf94089f047014b8403136c22f12b143c69a6a1228e9b60021ec318';
+
 // State
 const activeTasks = new Map();
 
@@ -450,13 +454,13 @@ async function broadcastToTrackers(message) {
 
 // Start AgentMail sync on extension startup
 async function startAgentMailSync() {
-  const user = await getAgentMailConfig();
-  if (!user || !user.agentmail_inbox_id) {
+  const config = await getAgentMailConfig();
+  if (!config.agentmail_inbox_id) {
     console.log('AgentMail sync: No inbox configured, skipping');
     return;
   }
 
-  console.log('AgentMail sync: Starting with inbox', user.agentmail_inbox_id);
+  console.log('AgentMail sync: Starting with inbox', config.agentmail_inbox_id);
 
   // Set up periodic alarm
   chrome.alarms.create(AGENTMAIL_ALARM_NAME, {
@@ -467,17 +471,23 @@ async function startAgentMailSync() {
   await pollAgentMail();
 }
 
-// Get AgentMail configuration from storage
+// Get AgentMail configuration - uses defaults if not configured by user
 async function getAgentMailConfig() {
   const result = await chrome.storage.local.get(['peeboUser']);
-  return result.peeboUser;
+  const user = result.peeboUser || {};
+
+  // Use user config if provided, otherwise fall back to defaults
+  return {
+    agentmail_inbox_id: user.agentmail_inbox_id || AGENTMAIL_DEFAULT_INBOX,
+    agentmail_api_key: user.agentmail_api_key || AGENTMAIL_DEFAULT_API_KEY
+  };
 }
 
 // Poll AgentMail for new messages
 async function pollAgentMail() {
   try {
-    const user = await getAgentMailConfig();
-    if (!user || !user.agentmail_inbox_id || !user.agentmail_api_key) {
+    const config = await getAgentMailConfig();
+    if (!config.agentmail_inbox_id || !config.agentmail_api_key) {
       return { success: false, error: 'AgentMail not configured' };
     }
 
@@ -492,10 +502,10 @@ async function pollAgentMail() {
 
     // Fetch messages from AgentMail
     const response = await fetch(
-      `${AGENTMAIL_API_URL}/inboxes/${user.agentmail_inbox_id}/threads`,
+      `${AGENTMAIL_API_URL}/inboxes/${config.agentmail_inbox_id}/threads`,
       {
         headers: {
-          'Authorization': `Bearer ${user.agentmail_api_key}`,
+          'Authorization': `Bearer ${config.agentmail_api_key}`,
           'Content-Type': 'application/json'
         }
       }
@@ -574,8 +584,9 @@ async function getSyncStatus() {
     processed_message_ids: []
   };
 
-  const user = await getAgentMailConfig();
-  const isConfigured = !!(user && user.agentmail_inbox_id && user.agentmail_api_key);
+  const config = await getAgentMailConfig();
+  // Always configured since we have defaults
+  const isConfigured = !!(config.agentmail_inbox_id && config.agentmail_api_key);
 
   return {
     isConfigured,
