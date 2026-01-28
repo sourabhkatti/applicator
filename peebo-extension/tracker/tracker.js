@@ -5,19 +5,12 @@ const BROWSER_USE_API_KEY = 'bu_fkMsZKn_HzIRkjT5gcGCPxhvrDvySfHgA402fEfNavc';
 const BROWSER_USE_API_URL = 'https://api.browser-use.com/api/v2';
 
 // AgentMail Console URL helper
-// Uses inbox_id (UUID) if available for more reliable URLs
+// Format: https://console.agentmail.to/dashboard/inboxes/{email}/inbox/{thread_id}
 function getAgentMailThreadUrl(app, threadIdField = 'status_email_thread_id') {
   const threadId = app[threadIdField];
   if (!threadId) return null;
 
-  // Use inbox_id UUID if available (more reliable)
-  const inboxId = app.email_inbox_id;
-  if (inboxId) {
-    return `https://console.agentmail.to/inboxes/${inboxId}/threads/${threadId}`;
-  }
-
-  // Fallback to email address format
-  return `https://console.agentmail.to/inboxes/applicator@agentmail.to/threads/${threadId}`;
+  return `https://console.agentmail.to/dashboard/inboxes/applicator@agentmail.to/inbox/${threadId}`;
 }
 
 // State
