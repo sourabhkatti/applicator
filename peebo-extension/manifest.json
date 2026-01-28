@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Peebo - Job Application Automation",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Autonomous job applications with ATS-optimized resumes and application tracking",
   "icons": {
     "16": "assets/mascot/peebo-icon-16.png",

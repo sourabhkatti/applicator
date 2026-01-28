@@ -60,12 +60,45 @@ const counts = {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await loadApplications();
+  await fixKnownUrls();  // Fix any jobs with outdated/generic URLs
   await loadActiveTasks();
   setupEventListeners();
   setupDragAndDrop();
   checkUrlParams();
   startPolling();
 });
+
+// Fix known jobs with correct URLs (runs once on load)
+async function fixKnownUrls() {
+  const urlFixes = {
+    'scale-ai-001': 'https://scale.com/careers/4481300005',
+    'postman-001': 'https://job-boards.greenhouse.io/postman/jobs/6665491003',
+    'anthropic-001': 'https://job-boards.greenhouse.io/anthropic/jobs/4807590008',
+    'docker-001': 'https://jobs.ashbyhq.com/docker/429c862a-99d5-4fd4-988b-d202daff3a15',
+    'intercom-001': 'https://job-boards.greenhouse.io/intercom/jobs/7179950',
+    'glean-001': 'https://job-boards.greenhouse.io/gleanwork/jobs/4312606005',
+    'launchdarkly-001': 'https://job-boards.greenhouse.io/launchdarkly/jobs/6645405003',
+    'nooks-001': 'https://jobs.ashbyhq.com/nooks/d5c02143-8383-4025-a9e0-10a6b0f84853',
+    'hockeystack-001': 'https://jobs.ashbyhq.com/hockeystack/9fda38da-33f5-4bec-adbb-23a698db9145',
+    'fulcrum-001': 'https://www.fulcrumapp.com/careers',
+    'crogl-001': 'https://www.crogl.com/careers'
+  };
+
+  let fixed = 0;
+  for (const app of applications) {
+    const correctUrl = urlFixes[app.id];
+    if (correctUrl && app.job_url !== correctUrl && app.jobUrl !== correctUrl) {
+      app.job_url = correctUrl;
+      app.jobUrl = correctUrl;
+      fixed++;
+    }
+  }
+
+  if (fixed > 0) {
+    await saveApplications();
+    console.log(`Fixed ${fixed} job URLs`);
+  }
+}
 
 // Load applications from storage
 async function loadApplications() {
