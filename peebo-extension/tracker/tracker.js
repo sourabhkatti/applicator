@@ -59,6 +59,8 @@ const counts = {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+  // First sync from Flask to get CLI-applied jobs
+  await syncFromFlask();
   await loadApplications();
   await fixKnownUrls();  // Fix any jobs with outdated/generic URLs
   await loadActiveTasks();
@@ -67,6 +69,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkUrlParams();
   startPolling();
 });
+
+// Sync jobs from Flask server (CLI-applied jobs in jobs.json)
+async function syncFromFlask() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'SYNC_FROM_FLASK' });
+    if (response && response.success && (response.imported > 0 || response.updated > 0)) {
+      console.log(`Flask sync: Imported ${response.imported}, updated ${response.updated}`);
+    } else if (response && response.skipped) {
+      // Server not running - this is fine, just means CLI tools aren't being used
+      console.log('Flask sync: Server not running (optional)');
+    }
+  } catch (error) {
+    // Extension might not support this message yet - that's OK
+    console.log('Flask sync: Not available');
+  }
+}
 
 // Fix known jobs with correct URLs (runs once on load)
 async function fixKnownUrls() {

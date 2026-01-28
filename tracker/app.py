@@ -11,8 +11,11 @@ from pathlib import Path
 
 import yaml
 from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
 
 app = Flask(__name__, static_folder='.')
+# Enable CORS for extension access
+CORS(app, origins=['chrome-extension://*', 'http://localhost:*'])
 
 # Paths
 TRACKER_DIR = Path(__file__).parent

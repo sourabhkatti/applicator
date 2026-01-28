@@ -72,6 +72,9 @@ async function handleMessage(message, sender) {
     case 'GET_SYNC_STATUS':
       return await getSyncStatus();
 
+    case 'SYNC_FROM_FLASK':
+      return await syncFromFlask();
+
     default:
       throw new Error(`Unknown message type: ${message.type}`);
   }
@@ -603,6 +606,218 @@ async function getSyncStatus() {
   };
 }
 
+// ============================================
+// Flask Sync Module
+// Syncs jobs from local Flask server (jobs.json) into chrome.storage.local
+// This allows CLI-applied jobs to appear in the extension
+// ============================================
+
+const FLASK_API_URL = 'http://localhost:8082';
+
+// Sync jobs from Flask server to chrome.storage.local
+async function syncFromFlask() {
+  try {
+    console.log('Flask sync: Fetching jobs from local server...');
+
+    const response = await fetch(`${FLASK_API_URL}/api/jobs`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (!response.ok) {
+      // Server not running - this is OK, just skip sync
+      if (response.status === 0 || response.status >= 500) {
+        console.log('Flask sync: Server not available, skipping');
+        return { success: false, error: 'Server not running', skipped: true };
+      }
+      throw new Error(`Flask API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const flaskJobs = data.jobs || [];
+
+    if (flaskJobs.length === 0) {
+      console.log('Flask sync: No jobs in Flask server');
+      return { success: true, imported: 0, updated: 0 };
+    }
+
+    // Get current applications from chrome.storage.local
+    const result = await chrome.storage.local.get(['applications']);
+    const existingApps = result.applications || [];
+
+    // Create a map of existing apps by job URL for deduplication
+    const existingByUrl = new Map();
+    const existingById = new Map();
+    existingApps.forEach(app => {
+      const url = app.job_url || app.jobUrl;
+      if (url) existingByUrl.set(url, app);
+      if (app.id) existingById.set(app.id, app);
+    });
+
+    let imported = 0;
+    let updated = 0;
+
+    for (const flaskJob of flaskJobs) {
+      const jobUrl = flaskJob.jobUrl || flaskJob.job_url;
+      const jobId = flaskJob.id;
+
+      // Check if job already exists (by URL or ID)
+      const existingByUrlMatch = jobUrl ? existingByUrl.get(jobUrl) : null;
+      const existingByIdMatch = jobId ? existingById.get(jobId) : null;
+      const existing = existingByUrlMatch || existingByIdMatch;
+
+      if (existing) {
+        // Job exists - check if Flask version is newer (has updates we don't have)
+        const flaskUpdated = new Date(flaskJob.updated_at || flaskJob.lastActivityDate || 0);
+        const existingUpdated = new Date(existing.updated_at || existing.lastActivityDate || 0);
+
+        // Only update if Flask version is newer AND has different status
+        if (flaskUpdated > existingUpdated || flaskJob.status !== existing.status) {
+          // Merge Flask data into existing (preserve chrome-specific fields)
+          Object.assign(existing, {
+            company: flaskJob.company || existing.company,
+            role: flaskJob.role || flaskJob.position || existing.role,
+            status: flaskJob.status || existing.status,
+            job_url: jobUrl || existing.job_url,
+            jobUrl: jobUrl || existing.jobUrl,
+            notes: flaskJob.notes || existing.notes,
+            rejection_reason: flaskJob.rejection_reason || existing.rejection_reason,
+            updated_at: flaskJob.updated_at || new Date().toISOString()
+          });
+          updated++;
+        }
+      } else {
+        // New job - convert Flask format to extension format and add
+        const newApp = {
+          id: jobId || generateId(),
+          company: flaskJob.company || 'Unknown',
+          role: flaskJob.role || flaskJob.position || 'Unknown',
+          job_url: jobUrl,
+          jobUrl: jobUrl,
+          status: flaskJob.status || 'applied',
+          applied_at: flaskJob.applied_at || flaskJob.dateApplied || new Date().toISOString(),
+          dateApplied: flaskJob.dateApplied || new Date().toISOString().split('T')[0],
+          email_verified: flaskJob.email_verified || false,
+          notes: flaskJob.notes || '',
+          rejection_reason: flaskJob.rejection_reason || null,
+          interview_stage: flaskJob.interview_stage || null,
+          interviews: flaskJob.interviews || [],
+          salary_range: flaskJob.salary_range || (flaskJob.salaryMin ? `$${flaskJob.salaryMin}-${flaskJob.salaryMax}` : null),
+          metadata: {
+            source: 'flask_sync',
+            browser_use_task_id: flaskJob.browser_use_task_id,
+            synced_at: new Date().toISOString()
+          },
+          updated_at: flaskJob.updated_at || new Date().toISOString()
+        };
+
+        existingApps.unshift(newApp);
+        existingByUrl.set(jobUrl, newApp);
+        existingById.set(newApp.id, newApp);
+        imported++;
+      }
+    }
+
+    // Save merged applications back to chrome.storage.local
+    if (imported > 0 || updated > 0) {
+      await chrome.storage.local.set({ applications: existingApps });
+      console.log(`Flask sync: Imported ${imported}, updated ${updated} applications`);
+
+      // Broadcast update to tracker UI
+      broadcastToTrackers({ type: 'APPLICATIONS_UPDATED' });
+    } else {
+      console.log('Flask sync: No changes needed');
+    }
+
+    return { success: true, imported, updated };
+
+  } catch (error) {
+    // Network errors (server not running) are not real errors
+    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      console.log('Flask sync: Server not running, skipping');
+      return { success: false, error: 'Server not running', skipped: true };
+    }
+
+    console.error('Flask sync error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Also sync FROM chrome.storage TO Flask (bidirectional)
+// This pushes extension changes back to jobs.json
+async function syncToFlask() {
+  try {
+    const result = await chrome.storage.local.get(['applications']);
+    const apps = result.applications || [];
+
+    if (apps.length === 0) return { success: true, pushed: 0 };
+
+    // Get current Flask data
+    const response = await fetch(`${FLASK_API_URL}/api/jobs`);
+    if (!response.ok) {
+      return { success: false, error: 'Server not running', skipped: true };
+    }
+
+    const flaskData = await response.json();
+    const flaskJobs = flaskData.jobs || [];
+
+    // Create map of Flask jobs by URL
+    const flaskByUrl = new Map();
+    flaskJobs.forEach(job => {
+      const url = job.jobUrl || job.job_url;
+      if (url) flaskByUrl.set(url, job);
+    });
+
+    let pushed = 0;
+
+    // Update Flask jobs with chrome data (especially status changes from email sync)
+    for (const app of apps) {
+      const url = app.job_url || app.jobUrl;
+      if (!url) continue;
+
+      const flaskJob = flaskByUrl.get(url);
+      if (flaskJob) {
+        // Check if chrome version has newer status update
+        const chromeUpdated = new Date(app.updated_at || 0);
+        const flaskUpdated = new Date(flaskJob.updated_at || 0);
+
+        if (chromeUpdated > flaskUpdated) {
+          // Update Flask job with chrome data
+          Object.assign(flaskJob, {
+            status: app.status,
+            email_verified: app.email_verified,
+            rejection_reason: app.rejection_reason,
+            interview_stage: app.interview_stage,
+            status_email_thread_id: app.status_email_thread_id,
+            notes: app.notes,
+            updated_at: app.updated_at
+          });
+          pushed++;
+        }
+      }
+    }
+
+    // Save back to Flask if changes made
+    if (pushed > 0) {
+      await fetch(`${FLASK_API_URL}/api/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...flaskData, jobs: flaskJobs })
+      });
+      console.log(`Flask sync: Pushed ${pushed} updates to server`);
+    }
+
+    return { success: true, pushed };
+
+  } catch (error) {
+    if (error.message.includes('Failed to fetch')) {
+      return { success: false, error: 'Server not running', skipped: true };
+    }
+    console.error('Flask sync (push) error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 // Extract company name from email sender address
 // e.g., "Sierra Recruiting <noreply@ashbyhq.com>" → "Sierra"
 // e.g., "HackerOne Hiring Team <noreply@ashbyhq.com>" → "HackerOne"
@@ -810,6 +1025,11 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         notificationTitle = 'Application Confirmed';
         notificationMessage = `✅ ${app.company} confirmed your application`;
         updated = true;
+      } else if (threadId && !app.confirmation_email_thread_id) {
+        // Backfill thread ID if missing (for reprocessing)
+        app.confirmation_email_thread_id = threadId;
+        updated = true;
+        console.log(`AgentMail sync: Backfilled confirmation thread ID for ${app.company}`);
       }
       break;
 
@@ -827,6 +1047,15 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         notificationMessage = `📧 ${app.company} - Application not moving forward`;
         updated = true;
         console.log(`AgentMail sync: Moving ${app.company} to rejected - "${reason}"`);
+      } else if (threadId && !app.status_email_thread_id) {
+        // Backfill thread ID if missing (for reprocessing)
+        app.status_email_thread_id = threadId;
+        // Also backfill rejection reason if missing
+        if (!app.rejection_reason) {
+          app.rejection_reason = extractRejectionReason(emailPreview);
+        }
+        updated = true;
+        console.log(`AgentMail sync: Backfilled rejection thread ID for ${app.company}`);
       }
       break;
 
@@ -849,6 +1078,11 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         notificationMessage = `🎉 ${app.company} wants to schedule an interview!`;
         updated = true;
         console.log(`AgentMail sync: Moving ${app.company} to interviewing`);
+      } else if (threadId && !app.status_email_thread_id) {
+        // Backfill thread ID if missing (for reprocessing)
+        app.status_email_thread_id = threadId;
+        updated = true;
+        console.log(`AgentMail sync: Backfilled interview thread ID for ${app.company}`);
       }
       break;
   }
