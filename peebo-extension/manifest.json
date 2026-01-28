@@ -47,7 +47,8 @@
     "alarms"
   ],
   "host_permissions": [
-    "https://api.browser-use.com/*"
+    "https://api.browser-use.com/*",
+    "https://api.agentmail.to/*"
   ],
   "web_accessible_resources": [
     {
