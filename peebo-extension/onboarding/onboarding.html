@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="onboarding.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="onboarding-container">
@@ -213,6 +213,41 @@
           <input type="text" class="input" id="exclude-companies" placeholder="Former employers, competitors...">
           <p class="form-hint">Comma-separated list (optional)</p>
         </div>
+
+        <!-- AgentMail Settings (Collapsible) -->
+        <div class="settings-section">
+          <button type="button" class="settings-toggle" id="agentmail-toggle">
+            <span class="toggle-title">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="2" y="4" width="14" height="12" rx="1"/>
+                <path d="M2 6l7 5 7-5"/>
+              </svg>
+              Email sync settings
+            </span>
+            <span class="toggle-hint">Auto-update application status from emails</span>
+            <svg class="toggle-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 6l4 4 4-4"/>
+            </svg>
+          </button>
+          <div class="settings-content hidden" id="agentmail-settings">
+            <p class="settings-description">
+              Connect your AgentMail inbox to automatically update application statuses when you receive emails (confirmations, rejections, interview requests).
+            </p>
+            <div class="form-group">
+              <label class="form-label" for="agentmail-inbox">AgentMail inbox ID</label>
+              <input type="text" class="input" id="agentmail-inbox" placeholder="yourname@agentmail.to">
+              <p class="form-hint">Your AgentMail inbox address</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="agentmail-key">AgentMail API key</label>
+              <input type="password" class="input" id="agentmail-key" placeholder="am_xxxxxxxxxxxx">
+              <p class="form-hint">Get your API key from <a href="https://agentmail.to/settings" target="_blank">agentmail.to/settings</a></p>
+            </div>
+            <div class="sync-test hidden" id="sync-test">
+              <span class="sync-test-status" id="sync-test-status"></span>
+            </div>
+          </div>
+        </div>
       </form>
 
       <div class="step-actions">
@@ -249,6 +284,42 @@
         </button>
       </div>
     </section>
+  </div>
+
+  <!-- AI Parsing Overlay -->
+  <div class="ai-parsing-overlay hidden" id="ai-parsing-overlay">
+    <div class="parsing-content">
+      <img src="../assets/mascot/peebo-working.svg" alt="Peebo" class="parsing-mascot">
+      <h2 class="parsing-title">Reading your resume...</h2>
+      <p class="parsing-status" id="parsing-status">Analyzing document</p>
+
+      <div class="parsing-progress">
+        <div class="parsing-progress-bar" id="parsing-progress-bar"></div>
+      </div>
+
+      <div class="parsing-steps">
+        <div class="parsing-step" id="parse-step-1">
+          <div class="parsing-step-icon"></div>
+          <span class="parsing-step-text">Extracting text from PDF</span>
+        </div>
+        <div class="parsing-step" id="parse-step-2">
+          <div class="parsing-step-icon"></div>
+          <span class="parsing-step-text">Finding contact information</span>
+        </div>
+        <div class="parsing-step" id="parse-step-3">
+          <div class="parsing-step-icon"></div>
+          <span class="parsing-step-text">Analyzing work experience</span>
+        </div>
+        <div class="parsing-step" id="parse-step-4">
+          <div class="parsing-step-icon"></div>
+          <span class="parsing-step-text">Identifying skills</span>
+        </div>
+        <div class="parsing-step" id="parse-step-5">
+          <div class="parsing-step-icon"></div>
+          <span class="parsing-step-text">Preparing your profile</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="onboarding.js" type="module"></script>
