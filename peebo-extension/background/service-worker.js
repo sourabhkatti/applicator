@@ -523,26 +523,34 @@ async function pollAgentMail() {
     let updatedCount = 0;
 
     for (const thread of threads) {
+      // API returns thread_id, not id
+      const threadId = thread.thread_id || thread.id;
+
       // Skip already processed threads
-      if (syncState.processed_message_ids.includes(thread.id)) {
+      if (syncState.processed_message_ids.includes(threadId)) {
         continue;
       }
 
-      // Get the latest message in the thread
-      const latestMessage = thread.latest_message || thread;
-      const subject = latestMessage.subject || '';
-      const preview = latestMessage.preview || latestMessage.snippet || '';
-      const fromAddress = latestMessage.from || thread.from || '';
+      // Get email content - API uses different field names
+      const subject = thread.subject || '';
+      const preview = thread.preview || thread.snippet || '';
+      // API returns senders as array, not from
+      const senders = thread.senders || [];
+      const fromAddress = senders[0] || thread.from || '';
+
+      console.log(`AgentMail sync: Processing thread from "${fromAddress}" - "${subject}"`);
 
       // Classify the email
       const classification = classifyEmail(subject, preview);
+      console.log(`AgentMail sync: Classified as ${classification.type} (${classification.confidence})`);
 
       if (classification.type !== 'unknown') {
         // Extract company from sender
         const company = extractCompanyFromSender(fromAddress);
+        console.log(`AgentMail sync: Extracted company: "${company}"`);
 
         // Try to match to an existing application
-        const matched = await matchAndUpdateApplication(company, classification);
+        const matched = await matchAndUpdateApplication(company, classification, subject, preview);
 
         if (matched) {
           updatedCount++;
@@ -550,7 +558,7 @@ async function pollAgentMail() {
       }
 
       // Mark as processed
-      syncState.processed_message_ids.push(thread.id);
+      syncState.processed_message_ids.push(threadId);
     }
 
     // Trim processed IDs to last 500 to prevent bloat
@@ -596,39 +604,50 @@ async function getSyncStatus() {
 }
 
 // Extract company name from email sender address
-// e.g., "Acme Corp Hiring <noreply@ashbyhq.com>" → "Acme Corp"
+// e.g., "Sierra Recruiting <noreply@ashbyhq.com>" → "Sierra"
+// e.g., "HackerOne Hiring Team <noreply@ashbyhq.com>" → "HackerOne"
+// e.g., "Plaid <no-reply@hire.lever.co>" → "Plaid"
 function extractCompanyFromSender(fromAddress) {
-  // Try to extract display name before email
+  if (!fromAddress) return null;
+
+  // Try to extract display name before email angle brackets
   const displayNameMatch = fromAddress.match(/^(.+?)\s*<[^>]+>$/);
   if (displayNameMatch) {
     let displayName = displayNameMatch[1].trim();
-    // Remove common suffixes like "Hiring Team", "Careers", "Jobs"
+    // Remove quotes if present
+    displayName = displayName.replace(/^["']|["']$/g, '').trim();
+    // Remove common suffixes like "Hiring Team", "Careers", "Jobs", "Recruiting"
     displayName = displayName
-      .replace(/\s*(Hiring|Careers|Jobs|Team|Recruiting|Talent)\s*(Team)?$/i, '')
+      .replace(/\s*(Hiring|Careers|Jobs|Recruiting|Talent|HR)\s*(Team)?$/i, '')
       .trim();
-    if (displayName) {
+    if (displayName && displayName.length > 1) {
+      console.log(`extractCompanyFromSender: "${fromAddress}" → "${displayName}" (from display name)`);
       return displayName;
     }
   }
 
-  // Fallback: extract domain from email
+  // Fallback: extract domain from email (only if not an ATS domain)
   const emailMatch = fromAddress.match(/<([^>]+)>/) || fromAddress.match(/([^\s@]+@[^\s@]+)/);
   if (emailMatch) {
     const email = emailMatch[1];
     const domain = email.split('@')[1];
     if (domain) {
-      // Remove common email service domains
-      if (domain.includes('ashbyhq.com') || domain.includes('greenhouse.io') ||
-          domain.includes('lever.co') || domain.includes('workday.com')) {
-        // These are ATS domains, can't extract company from them
+      // ATS domains don't tell us the company name
+      const atsDomains = ['ashbyhq.com', 'greenhouse.io', 'lever.co', 'workday.com',
+                         'hire.lever.co', 'myworkdayjobs.com', 'icims.com', 'jobvite.com'];
+      if (atsDomains.some(ats => domain.includes(ats))) {
+        console.log(`extractCompanyFromSender: "${fromAddress}" → null (ATS domain)`);
         return null;
       }
       // Extract company from domain (e.g., acme.com → Acme)
       const company = domain.split('.')[0];
-      return formatCompanyName(company);
+      const result = formatCompanyName(company);
+      console.log(`extractCompanyFromSender: "${fromAddress}" → "${result}" (from domain)`);
+      return result;
     }
   }
 
+  console.log(`extractCompanyFromSender: "${fromAddress}" → null (no match)`);
   return null;
 }
 
@@ -712,9 +731,47 @@ function classifyEmail(subject, preview) {
   return { type: 'unknown', confidence: 'low' };
 }
 
+// Extract a concise rejection reason from email content
+function extractRejectionReason(preview) {
+  if (!preview) return 'Application not selected';
+
+  const lowerPreview = preview.toLowerCase();
+
+  // Common rejection reasons with friendly summaries
+  if (lowerPreview.includes('decided to move forward with') ||
+      lowerPreview.includes('move forward with other')) {
+    return 'Selected other candidates';
+  }
+  if (lowerPreview.includes('position has been filled') ||
+      lowerPreview.includes('filled this position') ||
+      lowerPreview.includes('we have filled')) {
+    return 'Position filled';
+  }
+  if (lowerPreview.includes('no longer available') ||
+      lowerPreview.includes('no longer considering')) {
+    return 'Position no longer available';
+  }
+  if (lowerPreview.includes('not a match') ||
+      lowerPreview.includes('not the right fit')) {
+    return 'Not a match for this role';
+  }
+  if (lowerPreview.includes('pursuing other candidates')) {
+    return 'Pursuing other candidates';
+  }
+  if (lowerPreview.includes('decided not to proceed') ||
+      lowerPreview.includes('will not be proceeding')) {
+    return 'Not moving forward';
+  }
+
+  return 'Application not selected';
+}
+
 // Match email to application and update status
-async function matchAndUpdateApplication(company, classification) {
-  if (!company) return false;
+async function matchAndUpdateApplication(company, classification, emailSubject = '', emailPreview = '') {
+  if (!company) {
+    console.log('AgentMail sync: Cannot match - no company extracted');
+    return false;
+  }
 
   const result = await chrome.storage.local.get(['applications']);
   const applications = result.applications || [];
@@ -722,14 +779,17 @@ async function matchAndUpdateApplication(company, classification) {
   // Normalize company name for matching
   const normalizedCompany = company.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  // Find matching application
-  const matchIndex = applications.findIndex(app => {
+  // Find matching application - check company name
+  let matchIndex = applications.findIndex(app => {
     const appCompany = (app.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     return appCompany.includes(normalizedCompany) || normalizedCompany.includes(appCompany);
   });
 
+  // If no match by company name, log all companies for debugging
   if (matchIndex === -1) {
-    console.log(`AgentMail sync: No matching application for company "${company}"`);
+    const allCompanies = applications.map(a => a.company).join(', ');
+    console.log(`AgentMail sync: No match for "${company}" (normalized: "${normalizedCompany}")`);
+    console.log(`AgentMail sync: Available companies: ${allCompanies}`);
     return false;
   }
 
@@ -739,11 +799,14 @@ async function matchAndUpdateApplication(company, classification) {
   let notificationTitle = '';
   let notificationMessage = '';
 
+  // Extract reason from email for notes
+  const emailContent = `${emailSubject} ${emailPreview}`.substring(0, 200);
+
   switch (classification.type) {
     case 'confirmation':
       if (!app.email_verified) {
         app.email_verified = true;
-        app.notes = (app.notes || '') + `\n✅ Email confirmation received on ${timestamp}`;
+        app.notes = (app.notes || '') + `\n✅ [${timestamp}] Email confirmation received`;
         app.updated_at = new Date().toISOString();
         notificationTitle = 'Application Confirmed';
         notificationMessage = `✅ ${app.company} confirmed your application`;
@@ -754,11 +817,15 @@ async function matchAndUpdateApplication(company, classification) {
     case 'rejection':
       if (app.status !== 'rejected') {
         app.status = 'rejected';
-        app.notes = (app.notes || '') + `\n📧 Rejection received on ${timestamp}`;
+        // Include the email preview as the rejection reason
+        const reason = extractRejectionReason(emailPreview);
+        app.rejection_reason = reason;
+        app.notes = (app.notes || '') + `\n❌ [${timestamp}] Rejection: ${reason}`;
         app.updated_at = new Date().toISOString();
         notificationTitle = 'Application Update';
-        notificationMessage = `📧 Update from ${app.company} - Application closed`;
+        notificationMessage = `📧 ${app.company} - Application not moving forward`;
         updated = true;
+        console.log(`AgentMail sync: Moving ${app.company} to rejected - "${reason}"`);
       }
       break;
 
@@ -773,11 +840,12 @@ async function matchAndUpdateApplication(company, classification) {
           type: 'Interview',
           notes: `Detected from email on ${timestamp}`
         });
-        app.notes = (app.notes || '') + `\n🎉 Interview request received on ${timestamp}`;
+        app.notes = (app.notes || '') + `\n🎉 [${timestamp}] Interview request received!`;
         app.updated_at = new Date().toISOString();
         notificationTitle = 'Interview Request!';
         notificationMessage = `🎉 ${app.company} wants to schedule an interview!`;
         updated = true;
+        console.log(`AgentMail sync: Moving ${app.company} to interviewing`);
       }
       break;
   }
@@ -794,7 +862,7 @@ async function matchAndUpdateApplication(company, classification) {
       message: notificationMessage
     });
 
-    console.log(`AgentMail sync: Updated ${app.company} → ${classification.type}`);
+    console.log(`AgentMail sync: Successfully updated ${app.company} → ${classification.type}`);
   }
 
   return updated;

@@ -938,10 +938,26 @@ async function updateSyncStatus() {
 }
 
 // Manual sync trigger
-async function triggerManualSync() {
+// Hold Shift while clicking to reset sync state and reprocess all emails
+async function triggerManualSync(event) {
+  const resetSync = event && event.shiftKey;
+
   syncNowBtn.classList.add('syncing');
   syncIndicator.className = 'sync-indicator syncing';
-  syncText.textContent = 'Checking emails...';
+
+  if (resetSync) {
+    syncText.textContent = 'Resetting & syncing...';
+    // Clear the processed message IDs to reprocess all emails
+    await chrome.storage.local.set({
+      agentmailSyncState: {
+        last_sync_at: null,
+        processed_message_ids: []
+      }
+    });
+    console.log('Sync state reset - will reprocess all emails');
+  } else {
+    syncText.textContent = 'Checking emails...';
+  }
 
   try {
     const response = await chrome.runtime.sendMessage({ type: 'SYNC_AGENTMAIL' });
@@ -951,7 +967,7 @@ async function triggerManualSync() {
         showToast(`Updated ${response.updatedCount} application(s) from email`, 'success');
         await loadApplications();
       } else {
-        showToast('No new updates from email', 'info');
+        showToast(resetSync ? 'Reset complete - no new updates' : 'No new updates from email', 'info');
       }
     } else if (response && response.error) {
       showToast(`Sync error: ${response.error}`, 'error');
@@ -965,6 +981,18 @@ async function triggerManualSync() {
     syncNowBtn.classList.remove('syncing');
   }
 }
+
+// Expose reset function to console for debugging
+window.resetAgentMailSync = async function() {
+  await chrome.storage.local.set({
+    agentmailSyncState: {
+      last_sync_at: null,
+      processed_message_ids: []
+    }
+  });
+  console.log('AgentMail sync state reset. Click "Sync Now" to reprocess emails.');
+  return 'Sync state cleared';
+};
 
 // Setup sync button listener
 if (syncNowBtn) {
