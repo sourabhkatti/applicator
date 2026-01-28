@@ -549,8 +549,8 @@ async function pollAgentMail() {
         const company = extractCompanyFromSender(fromAddress);
         console.log(`AgentMail sync: Extracted company: "${company}"`);
 
-        // Try to match to an existing application
-        const matched = await matchAndUpdateApplication(company, classification, subject, preview);
+        // Try to match to an existing application (pass threadId for email link)
+        const matched = await matchAndUpdateApplication(company, classification, subject, preview, threadId);
 
         if (matched) {
           updatedCount++;
@@ -767,7 +767,8 @@ function extractRejectionReason(preview) {
 }
 
 // Match email to application and update status
-async function matchAndUpdateApplication(company, classification, emailSubject = '', emailPreview = '') {
+// threadId is stored to create a direct link to the email that caused the status change
+async function matchAndUpdateApplication(company, classification, emailSubject = '', emailPreview = '', threadId = null) {
   if (!company) {
     console.log('AgentMail sync: Cannot match - no company extracted');
     return false;
@@ -799,15 +800,13 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
   let notificationTitle = '';
   let notificationMessage = '';
 
-  // Extract reason from email for notes
-  const emailContent = `${emailSubject} ${emailPreview}`.substring(0, 200);
-
   switch (classification.type) {
     case 'confirmation':
       if (!app.email_verified) {
         app.email_verified = true;
         app.notes = (app.notes || '') + `\n✅ [${timestamp}] Email confirmation received`;
         app.updated_at = new Date().toISOString();
+        if (threadId) app.confirmation_email_thread_id = threadId;
         notificationTitle = 'Application Confirmed';
         notificationMessage = `✅ ${app.company} confirmed your application`;
         updated = true;
@@ -822,6 +821,8 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         app.rejection_reason = reason;
         app.notes = (app.notes || '') + `\n❌ [${timestamp}] Rejection: ${reason}`;
         app.updated_at = new Date().toISOString();
+        // Store thread ID for direct email link
+        if (threadId) app.status_email_thread_id = threadId;
         notificationTitle = 'Application Update';
         notificationMessage = `📧 ${app.company} - Application not moving forward`;
         updated = true;
@@ -842,6 +843,8 @@ async function matchAndUpdateApplication(company, classification, emailSubject =
         });
         app.notes = (app.notes || '') + `\n🎉 [${timestamp}] Interview request received!`;
         app.updated_at = new Date().toISOString();
+        // Store thread ID for direct email link
+        if (threadId) app.status_email_thread_id = threadId;
         notificationTitle = 'Interview Request!';
         notificationMessage = `🎉 ${app.company} wants to schedule an interview!`;
         updated = true;

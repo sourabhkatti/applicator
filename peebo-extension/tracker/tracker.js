@@ -169,6 +169,7 @@ function createAppCard(app) {
   const card = document.createElement('div');
   card.className = 'app-card';
   card.dataset.id = app.id;
+  card.dataset.status = app.status;
   card.draggable = true;
 
   // Support both field name formats (applied_at/dateApplied, role/position, job_url/jobUrl)
@@ -176,17 +177,20 @@ function createAppCard(app) {
   const role = app.role || app.position || '';
   const jobUrl = app.job_url || app.jobUrl;
 
-  const formattedDate = formatDate(appliedDate);
+  const formattedAppliedDate = formatAppliedDate(appliedDate);
+
+  // Build status reason section
+  const statusInfo = getStatusInfo(app);
 
   card.innerHTML = `
     <div class="app-card-header">
-      <div>
+      <div class="app-card-info">
         <h3 class="app-company">${escapeHtml(app.company)}</h3>
         <p class="app-role">${escapeHtml(role)}</p>
       </div>
       <div class="app-card-actions">
         ${jobUrl ? `
-          <a href="${escapeHtml(jobUrl)}" target="_blank" class="btn btn-icon btn-ghost" title="Open job posting">
+          <a href="${escapeHtml(jobUrl)}" target="_blank" class="btn btn-icon btn-ghost" title="View job posting">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M6 3H4a1 1 0 00-1 1v8a1 1 0 001 1h8a1 1 0 001-1v-2"/>
               <path d="M9 2h5v5"/>
@@ -206,24 +210,13 @@ function createAppCard(app) {
         </button>
       </div>
     </div>
-    <div class="app-card-meta">
-      <span class="app-date">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="6" cy="6" r="4.5"/>
-          <path d="M6 3.5V6l1.5 1"/>
-        </svg>
-        ${formattedDate}
-      </span>
-      ${app.salary_range ? `
-        <span class="app-salary">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M6 1v10M9 3.5C9 2.67 7.66 2 6 2S3 2.67 3 3.5 4.34 5 6 5s3 .67 3 1.5S7.66 8 6 8s-3-.67-3-1.5"/>
-          </svg>
-          ${escapeHtml(app.salary_range)}
-        </span>
-      ` : ''}
+
+    <div class="app-card-date">
+      <span class="date-label">Applied</span>
+      <span class="date-value">${formattedAppliedDate}</span>
     </div>
-    ${app.notes ? `<p class="app-notes">${escapeHtml(app.notes)}</p>` : ''}
+
+    ${statusInfo.html}
   `;
 
   // Add event listeners
@@ -248,6 +241,127 @@ function createAppCard(app) {
   });
 
   return card;
+}
+
+// Get status information with reason and email link
+function getStatusInfo(app) {
+  const status = app.status;
+
+  // For applied status, no additional info needed unless email verified
+  if (status === 'applied') {
+    if (app.email_verified) {
+      return {
+        html: `<div class="app-status-info status-confirmed">
+          <span class="status-icon">✓</span>
+          <span class="status-text">Application confirmed</span>
+        </div>`
+      };
+    }
+    return { html: '' };
+  }
+
+  // For rejected status
+  if (status === 'rejected') {
+    const reason = app.rejection_reason || extractReasonFromNotes(app.notes, 'rejection');
+    const emailLink = app.status_email_thread_id ?
+      `<a href="https://console.agentmail.to/inbox/applicator@agentmail.to/thread/${app.status_email_thread_id}" target="_blank" class="email-link" title="View email">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1" y="2" width="10" height="8" rx="1"/>
+          <path d="M1 3l5 4 5-4"/>
+        </svg>
+      </a>` : '';
+
+    return {
+      html: `<div class="app-status-info status-rejected">
+        <span class="status-reason">${escapeHtml(reason || 'Not selected')}</span>
+        ${emailLink}
+      </div>`
+    };
+  }
+
+  // For interviewing status
+  if (status === 'interviewing') {
+    const stage = app.interview_stage || 'Interview scheduled';
+    const stageLabel = formatInterviewStage(stage);
+    const emailLink = app.status_email_thread_id ?
+      `<a href="https://console.agentmail.to/inbox/applicator@agentmail.to/thread/${app.status_email_thread_id}" target="_blank" class="email-link" title="View email">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1" y="2" width="10" height="8" rx="1"/>
+          <path d="M1 3l5 4 5-4"/>
+        </svg>
+      </a>` : '';
+
+    return {
+      html: `<div class="app-status-info status-interviewing">
+        <span class="status-reason">${escapeHtml(stageLabel)}</span>
+        ${emailLink}
+      </div>`
+    };
+  }
+
+  // For offer status
+  if (status === 'offer') {
+    const salaryInfo = app.offer_salary || app.salary_range || '';
+    return {
+      html: `<div class="app-status-info status-offer">
+        <span class="status-icon">🎉</span>
+        <span class="status-reason">${salaryInfo ? escapeHtml(salaryInfo) : 'Offer received!'}</span>
+      </div>`
+    };
+  }
+
+  return { html: '' };
+}
+
+// Extract reason from notes (fallback for older entries)
+function extractReasonFromNotes(notes, type) {
+  if (!notes) return null;
+
+  if (type === 'rejection') {
+    // Look for rejection reason in notes
+    const match = notes.match(/Rejection:\s*([^\n]+)/i);
+    if (match) return match[1].trim();
+
+    // Look for common patterns
+    if (notes.toLowerCase().includes('position filled')) return 'Position filled';
+    if (notes.toLowerCase().includes('other candidates')) return 'Selected other candidates';
+    if (notes.toLowerCase().includes('after initial screen')) return 'After initial screen';
+    if (notes.toLowerCase().includes('after hm interview')) return 'After HM interview';
+  }
+
+  return null;
+}
+
+// Format interview stage for display
+function formatInterviewStage(stage) {
+  const stages = {
+    'recruiter_screen': 'Recruiter screen',
+    'hiring_manager': 'Hiring manager',
+    'panel_onsite': 'Panel/Onsite',
+    'technical': 'Technical round',
+    'final': 'Final round'
+  };
+  return stages[stage] || stage || 'Interview scheduled';
+}
+
+// Format applied date with "Applied" context
+function formatAppliedDate(dateStr) {
+  if (!dateStr) return 'Unknown';
+
+  try {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+
+    // Show month and day for older dates
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return 'Unknown';
+  }
 }
 
 // Update stats
