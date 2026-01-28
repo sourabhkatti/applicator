@@ -545,59 +545,138 @@ Upload this file for the resume: {prepared_resume}
 
 6. **LinkedIn**: Enter {applicant['linkedin']} in LinkedIn/Social Profile field
 
-7. **Work Authorization & Policy Questions (CRITICAL - these are common failure points)**:
+7. **Work Authorization & Policy Questions (CRITICAL - Platform-specific handling)**:
 
-   **ASHBY RADIO BUTTONS - USE JAVASCRIPT (clicking spans/labels does NOT work)**:
+   First, detect the platform:
+   - **Ashby** (jobs.ashbyhq.com): Uses custom React buttons, NOT native HTML radios
+   - **Lever** (jobs.lever.co): Uses native `<select>` dropdowns
+   - **Greenhouse**: Uses native HTML radios or selects
 
-   Ashby uses custom React radio components where:
-   - The `<input type="radio">` is hidden inside a `<span class="_container_...">`
-   - The visible label is a SIBLING `<label for="...">` element, NOT a parent
-   - Clicking the label span does NOT trigger React's state update
-   - You MUST click the actual `<input>` element directly
+   **=== ASHBY FORMS (jobs.ashbyhq.com) ===**
 
-   **USE THE EVALUATE ACTION WITH THIS EXACT JAVASCRIPT:**
+   CRITICAL: Ashby renders Yes/No questions as BUTTONS, not `<input type="radio">`.
+   The HTML looks like: `<button>Yes</button> <button>No</button>` or styled divs with text.
 
-   **CRITICAL: Run this SINGLE JavaScript snippet to select ALL radio buttons at once:**
+   **Step 1: Work Authorization ("Are you legally authorized...")**
+   Find and click the "Yes" BUTTON element:
+   ```javascript
+   (function() {{
+     // Find all buttons and clickable elements
+     var buttons = document.querySelectorAll('button, [role="button"], [type="button"]');
+     var questionText = 'legally authorized to work';
+     var answerText = 'yes';
+
+     // First find the question section
+     var sections = document.querySelectorAll('[class*="field"], [class*="question"], [class*="form-group"], div');
+     for (var s = 0; s < sections.length; s++) {{
+       var section = sections[s];
+       if (section.textContent.toLowerCase().includes(questionText)) {{
+         // Found the question, now find Yes button in this section
+         var btns = section.querySelectorAll('button, [role="button"], [role="option"], span[class*="option"], div[class*="option"]');
+         for (var b = 0; b < btns.length; b++) {{
+           if (btns[b].textContent.trim().toLowerCase() === answerText) {{
+             var rect = btns[b].getBoundingClientRect();
+             return JSON.stringify({{x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2), found: true}});
+           }}
+         }}
+       }}
+     }}
+     return JSON.stringify({{found: false, error: 'Question or button not found'}});
+   }})();
    ```
-   (function(){{var r=document.querySelectorAll('input[type=radio]');var results=[];for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');var t=lbl?lbl.innerText:'';if(t.includes('do not require sponsorship')){{r[i].click();results.push('Sponsor:No')}}if(t.includes('able to work from the office')){{r[i].click();results.push('Hybrid:Yes')}}if(t.includes('San Francisco')&&t.includes('based')){{r[i].click();results.push('Office:SF')}}}}return results.join(', ')||'No matches';}})()
+   Then click at the returned x, y coordinates.
+
+   **Step 2: Sponsorship ("Will you now or in the future require sponsorship...")**
+   We need to click "No" (since applicant does not require sponsorship):
+   ```javascript
+   (function() {{
+     var questionText = 'require sponsorship';
+     var answerText = 'no';
+
+     var sections = document.querySelectorAll('[class*="field"], [class*="question"], [class*="form-group"], div');
+     for (var s = 0; s < sections.length; s++) {{
+       var section = sections[s];
+       if (section.textContent.toLowerCase().includes(questionText)) {{
+         var btns = section.querySelectorAll('button, [role="button"], [role="option"], span[class*="option"], div[class*="option"]');
+         for (var b = 0; b < btns.length; b++) {{
+           if (btns[b].textContent.trim().toLowerCase() === answerText) {{
+             var rect = btns[b].getBoundingClientRect();
+             return JSON.stringify({{x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2), found: true}});
+           }}
+         }}
+       }}
+     }}
+     return JSON.stringify({{found: false, error: 'Question or button not found'}});
+   }})();
    ```
 
-   This script will:
-   1. Find radio with "do not require sponsorship" → click it (No sponsorship needed)
-   2. Find radio with "able to work from the office" → click it (Yes to hybrid)
-   3. Find radio with "San Francisco" AND "based" → click it (SF office)
+   **Step 3: Office/Hybrid Work Questions**
+   Look for questions about "work from office" or "in-office":
+   ```javascript
+   (function() {{
+     var questionKeywords = ['work from the office', 'in-office', 'days a week', 'office location', 'hybrid'];
+     var answerText = 'yes';
 
-   **If the above doesn't work, run these individual scripts:**
-
-   For sponsorship (select "No, I do not require sponsorship"):
+     var sections = document.querySelectorAll('[class*="field"], [class*="question"], [class*="form-group"], div');
+     for (var s = 0; s < sections.length; s++) {{
+       var section = sections[s];
+       var sectionText = section.textContent.toLowerCase();
+       for (var k = 0; k < questionKeywords.length; k++) {{
+         if (sectionText.includes(questionKeywords[k])) {{
+           var btns = section.querySelectorAll('button, [role="button"], [role="option"], span[class*="option"], div[class*="option"]');
+           for (var b = 0; b < btns.length; b++) {{
+             if (btns[b].textContent.trim().toLowerCase() === answerText) {{
+               var rect = btns[b].getBoundingClientRect();
+               return JSON.stringify({{x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2), found: true}});
+             }}
+           }}
+         }}
+       }}
+     }}
+     return JSON.stringify({{found: false, error: 'Office question not found'}});
+   }})();
    ```
-   (function(){{var r=document.querySelectorAll('input[type=radio]');for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');if(lbl&&lbl.innerText.includes('do not require')){{r[i].click();return 'Selected: '+lbl.innerText.substring(0,50)}}}}return 'Not found';}})()
-   ```
 
-   For hybrid policy (select "Yes, I'm able to work from office"):
-   ```
-   (function(){{var r=document.querySelectorAll('input[type=radio]');for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');if(lbl&&lbl.innerText.includes('able to work from the office')){{r[i].click();return 'Selected: '+lbl.innerText.substring(0,50)}}}}return 'Not found';}})()
-   ```
+   **Ashby Verification:**
+   After clicking, the selected button should appear highlighted/filled. Look for visual change.
 
-   For office location (select San Francisco):
-   ```
-   (function(){{var r=document.querySelectorAll('input[type=radio]');for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');if(lbl&&lbl.innerText.includes('San Francisco')){{r[i].click();return 'Selected: '+lbl.innerText.substring(0,50)}}}}return 'Not found';}})()
-   ```
+   **=== LEVER FORMS (jobs.lever.co) ===**
 
-   **IMPORTANT: Always use evaluate action for Ashby radio buttons. Clicking span elements does NOT work.**
+   Lever uses STANDARD HTML `<select>` DROPDOWNS, not radio buttons!
 
-   **Answer these questions as follows:**
-   - "Are you legally authorized to work in the United States?" → {"Yes" if authorized_us else "No"} (use click action on Yes/No buttons - these are usually simple buttons, not custom radios)
-   - "Will you now or in the future require employment visa sponsorship?" → {"Yes, I will require [company] to sponsor my employment" if requires_sponsorship else "No, I do not require sponsorship"} (USE JAVASCRIPT ABOVE)
+   **For work authorization/sponsorship:** These are SELECT elements, not radios.
+   - Find the `<select>` element by its label text
+   - Click to open the dropdown
+   - Select the appropriate option from the list
 
-   **Hybrid/Remote Work Policy Questions (common on Ashby forms):**
-   - "Are you able to work from the office X days a week?" → USE JAVASCRIPT to select "Yes, I'm able to work from the office"
-   - "Which office would you be able to work from?" → USE JAVASCRIPT to select "San Francisco"
+   Example for sponsorship (select "No"):
+   1. Find the select element near text "sponsorship" or "visa"
+   2. Click on the select to open dropdown
+   3. Click on option "No" or equivalent
 
-   **After running the evaluate JavaScript:**
-   - Check the return value - it should say "Selected: ..." for each radio
-   - If it returns "Not found", the page may have different label text - adapt the search string
-   - Wait 2 seconds after each evaluate action for React to update
+   **For EEO/demographic questions on Lever:**
+   - These are also `<select>` dropdowns
+   - Select "Decline to self-identify" or "I don't wish to answer"
+
+   **LEVER FIELD PERSISTENCE ISSUE:**
+   Lever forms may CLEAR fields on validation failure. After each submit attempt:
+   1. Check if Name/Email/Phone fields are still filled
+   2. Check if Resume shows filename (not "Upload File")
+   3. Re-fill any cleared fields before retrying
+
+   **=== GREENHOUSE FORMS ===**
+
+   Greenhouse can use either native radios or selects depending on the company's setup.
+   - If you see circular radio buttons (○), click directly on them
+   - If you see dropdown selects, click to open and select option
+   - Both approaches work with standard browser-use click actions
+
+   **UNIVERSAL TROUBLESHOOTING:**
+   If coordinate click doesn't work:
+   1. Scroll the element into view first
+   2. Re-run the evaluate to get fresh coordinates (page may have shifted)
+   3. Try clicking slightly above/below the center if the element has padding
+   4. For stubborn elements, try clicking the LABEL text instead of the button
 
 8. **Custom Questions** (answer ALL that have asterisks or say required):
    - Use the applicant background above to write thoughtful, relevant answers
@@ -635,32 +714,80 @@ Upload this file for the resume: {prepared_resume}
         1. READ AND LIST every single error message on the page
         2. For EACH error message, find the corresponding field
         3. Fill/fix that specific field with the correct value
-        4. **CRITICAL: Ashby forms RESET radio selections on validation failure**
-           Run the all-in-one JavaScript to re-select all radios RIGHT BEFORE submitting:
-           ```
-           (function(){{var r=document.querySelectorAll('input[type=radio]');var results=[];for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');var t=lbl?lbl.innerText:'';if(t.includes('do not require sponsorship')){{r[i].click();results.push('Sponsor:No')}}if(t.includes('able to work from the office')){{r[i].click();results.push('Hybrid:Yes')}}if(t.includes('San Francisco')&&t.includes('based')){{r[i].click();results.push('Office:SF')}}}}return results.join(', ')||'No matches';}})()
-           ```
-        5. After fixing ALL errors AND re-selecting radios, scroll through form to verify
+        4. **CRITICAL: Ashby forms may RESET ALL FIELDS on validation failure**
+           Not just radios - also text fields, file uploads, and selections may be reset.
+           You MUST verify and re-fill ALL required fields:
+
+           a) **Re-check all text fields** - If any show "Type here..." placeholder or are empty:
+              - Re-enter Name, Email, Phone, LinkedIn URL
+
+           b) **Re-check Location** - If it shows empty or "Type here...":
+              - Type "San Francisco", wait for dropdown, select option
+
+           c) **Re-check Resume** - If it shows "Upload File" button instead of filename:
+              - Re-upload the resume file
+
+           d) **Re-select Yes/No questions (PLATFORM-SPECIFIC)**:
+
+              **FOR ASHBY (jobs.ashbyhq.com):**
+              Ashby uses BUTTONS, not radio inputs. Use this JavaScript to find and click:
+              ```javascript
+              (function() {{
+                var questions = [
+                  {{q: 'legally authorized', a: 'yes'}},
+                  {{q: 'require sponsorship', a: 'no'}},
+                  {{q: 'work from the office', a: 'yes'}},
+                  {{q: 'in-office', a: 'yes'}}
+                ];
+                var results = [];
+                for (var i = 0; i < questions.length; i++) {{
+                  var found = false;
+                  var sections = document.querySelectorAll('div');
+                  for (var s = 0; s < sections.length && !found; s++) {{
+                    if (sections[s].textContent.toLowerCase().includes(questions[i].q)) {{
+                      var btns = sections[s].querySelectorAll('button, [role="button"], [role="option"]');
+                      for (var b = 0; b < btns.length; b++) {{
+                        if (btns[b].textContent.trim().toLowerCase() === questions[i].a) {{
+                          var rect = btns[b].getBoundingClientRect();
+                          results.push({{q: questions[i].q, x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2)}});
+                          found = true;
+                          break;
+                        }}
+                      }}
+                    }}
+                  }}
+                }}
+                return JSON.stringify(results);
+              }})();
+              ```
+              Then click at each x,y coordinate in the results array.
+
+              **FOR LEVER (jobs.lever.co):**
+              Lever uses `<select>` dropdowns. Click each select element and choose the option.
+              Do NOT look for radio inputs - they don't exist on Lever.
+
+           e) **VISUALLY VERIFY** selections registered:
+              - Ashby: Button should appear highlighted/selected
+              - Lever: Dropdown should show selected value (not "Select...")
+
+        5. After re-filling ALL fields AND re-selecting options, scroll through ENTIRE form to verify
         6. ONLY THEN click Submit again
 
       - Common errors and how to fix them:
-        * "Missing entry for required field: Location" → Location is a COMBOBOX: type "San Francisco", wait 2s for dropdown, click the suggestion OR press Enter to confirm
-        * "Missing entry for required field: Can you provide proof of authorization" → Click "Yes" button
-        * "Missing entry for required field: Will you now or in the future require employer sponsorship" → Find the radio button question, click the "No, I do not require sponsorship" text label
-        * "Missing entry for required field: [hybrid/office policy question]" → Find the hybrid policy question, click "Yes, I'm able to work from the office 3 days a week" text label
-        * "Missing entry for required field: Which of [company]'s offices" → Find the office selection, click "San Francisco" option text
+        * "Missing entry for required field: Location" → Type "San Francisco", wait for dropdown, select option
+        * "Missing entry for required field: Can you provide proof of authorization" → Click "Yes" button/option
+        * "Missing entry for required field: Will you now or in the future require employer sponsorship" → Click "No" button/option
+        * "Missing entry for required field: [hybrid/office policy question]" → Click "Yes" button/option
         * "Missing entry for required field: [field name]" → Scroll to find that field and fill it
         * Any dropdown showing "Select..." → Click it and choose appropriate option
         * Any checkbox that says "required" → Check it if appropriate
 
-      - FOR RADIO BUTTONS THAT DIDN'T REGISTER - USE JAVASCRIPT VIA EVALUATE ACTION:
-        1. Ashby radios use `<label for="id">` as SIBLING elements, not parents
-        2. Run this all-in-one script to select sponsorship, hybrid, and office radios:
-           ```
-           (function(){{var r=document.querySelectorAll('input[type=radio]');var results=[];for(var i=0;i<r.length;i++){{var lbl=document.querySelector('label[for=\"'+r[i].id+'\"]');var t=lbl?lbl.innerText:'';if(t.includes('do not require sponsorship')){{r[i].click();results.push('Sponsor:No')}}if(t.includes('able to work from the office')){{r[i].click();results.push('Hybrid:Yes')}}if(t.includes('San Francisco')&&t.includes('based')){{r[i].click();results.push('Office:SF')}}}}return results.join(', ')||'No matches';}})()
-           ```
-        3. The script finds labels via `document.querySelector('label[for="'+r[i].id+'"]')`
-        4. Wait 2 seconds after running for React state to update
+      - **FOR YES/NO QUESTIONS THAT DIDN'T REGISTER:**
+        1. Detect platform from URL (ashbyhq.com vs lever.co vs greenhouse.io)
+        2. ASHBY: Use evaluate to find button coordinates, then coordinate click
+        3. LEVER: Find the `<select>` element, click to open, click the option
+        4. GREENHOUSE: Try direct click on radio/select elements
+        5. After each action, verify the element shows as selected
 
       - You MUST resolve every single bullet point in error messages before clicking Submit again
       - After fixing errors, verify by scrolling through form that no red text or error messages remain

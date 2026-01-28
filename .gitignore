@@ -51,3 +51,18 @@ build/
 # Temporary files
 *.tmp
 *.temp
+
+# State/PID files
+*.pid
+*_state.json
+*_sync_state.json
+
+# Backup files
+*.backup
+*.bak
+*.old
+*.pre-migration
+
+# One-off scripts (not part of main workflow)
+pending_jobs.txt
+postman-interview-prep.md

@@ -373,7 +373,7 @@ def trigger_email_sync():
 
 def main():
     """Run the server and open the browser."""
-    port = 8080
+    port = 8082
     url = f"http://localhost:{port}"
 
     print(f"Starting Job Tracker at {url}")
