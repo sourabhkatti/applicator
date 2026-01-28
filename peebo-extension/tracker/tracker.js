@@ -197,6 +197,13 @@ function createAppCard(app) {
   const editBtn = card.querySelector('.edit-btn');
   const deleteBtn = card.querySelector('.delete-btn');
 
+  // Click on card to open edit modal
+  card.addEventListener('click', (e) => {
+    // Don't trigger if clicking on buttons or links
+    if (e.target.closest('button') || e.target.closest('a')) return;
+    openEditModal(app);
+  });
+
   editBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     openEditModal(app);

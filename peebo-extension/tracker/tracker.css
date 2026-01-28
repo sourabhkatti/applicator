@@ -238,7 +238,7 @@ html, body {
   border-radius: var(--radius-md);
   padding: var(--space-4);
   box-shadow: var(--shadow-sm);
-  cursor: grab;
+  cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out-smooth);
   animation: slide-up-fade var(--duration-normal) var(--ease-spring);
 }
