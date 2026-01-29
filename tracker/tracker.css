@@ -2229,6 +2229,54 @@ html, body {
   color: #991b1b;
 }
 
+/* Activity Footer Row */
+.activity-footer-row {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.activity-footer-row > * {
+  flex: 1;
+}
+
+/* AgentMail Link Button */
+.agentmail-link-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: none;
+  border: 1px dashed #dbeafe;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: #1e40af;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all var(--duration-fast);
+}
+
+.agentmail-link-btn:hover {
+  background: #dbeafe;
+  border-color: #1e40af;
+  border-style: solid;
+}
+
+/* Email Verified Badge - Clickable */
+.badge-email-verified {
+  background-color: #dbeafe;
+  color: #1e40af;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.badge-email-verified:hover {
+  background-color: #bfdbfe;
+  text-decoration: underline;
+}
+
 /* ============================================
    RESPONSIVE - Side Panel
    ============================================ */

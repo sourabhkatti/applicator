@@ -19,6 +19,18 @@ let activeTab = 'details';
 let navigationStack = []; // For back button
 let hasUnreadActivity = false;
 
+// AgentMail configuration
+const AGENTMAIL_INBOX = 'applicator@agentmail.to';
+const AGENTMAIL_CONSOLE_BASE = 'https://console.agentmail.to';
+
+/**
+ * Get AgentMail console URL for the inbox
+ * Users can click to view their confirmation emails
+ */
+function getAgentMailConsoleUrl() {
+  return `${AGENTMAIL_CONSOLE_BASE}/dashboard/inboxes/${encodeURIComponent(AGENTMAIL_INBOX)}/inbox`;
+}
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -307,9 +319,10 @@ function createJobCard(job) {
     badges.push('<span class="badge badge-referral">🟡 Referral</span>');
   }
   
-  // Email verified badge
+  // Email verified badge - clickable link to AgentMail console
   if (job.email_verified) {
-    badges.push('<span class="badge badge-email-verified">✅ Verified</span>');
+    const agentMailUrl = getAgentMailConsoleUrl();
+    badges.push(`<a href="${agentMailUrl}" target="_blank" class="badge badge-email-verified" title="View emails in AgentMail" onclick="event.stopPropagation()">✅ Verified</a>`);
   }
   
   // Interview stage pill
@@ -1613,15 +1626,23 @@ function renderActivityPanel() {
 
   content.innerHTML = html;
 
-  // Show footer with clear button
+  // Show footer with clear button and AgentMail link
   footer.classList.remove('hidden');
   footer.innerHTML = `
-    <button class="clear-activity-btn" onclick="handleClearAllActivity()">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
-      </svg>
-      Clear all activity
-    </button>
+    <div class="activity-footer-row">
+      <a href="${getAgentMailConsoleUrl()}" target="_blank" class="agentmail-link-btn" title="View confirmation emails in AgentMail">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 4l6 4 6-4M2 4h12v9H2z"/>
+        </svg>
+        Open AgentMail
+      </a>
+      <button class="clear-activity-btn" onclick="handleClearAllActivity()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
+        </svg>
+        Clear all activity
+      </button>
+    </div>
   `;
 }
 
@@ -2184,8 +2205,9 @@ function openBatchPanel(state = 'setup') {
  * Close batch panel
  */
 function closeBatchPanel() {
-  // Close the side panel
-  closeSidePanel();
+  // Close the side panel directly (don't call closeSidePanel to avoid recursion)
+  document.getElementById('panel-backdrop').classList.add('hidden');
+  document.getElementById('side-panel').classList.add('hidden');
 
   // Reset to show main content
   document.getElementById('panel-content').classList.remove('hidden');
@@ -2198,6 +2220,8 @@ function closeBatchPanel() {
   }
 
   currentPanel = null;
+  currentJob = null;
+  navigationStack = [];
 }
 
 /**
@@ -2791,7 +2815,7 @@ async function addBatchJobToTracker(batchJob) {
       jobUrl: batchJob.job_url,
       nextAction: 'Wait for response',
       notes: `Applied via Peebo batch apply. Cost: $${batchJob.cost?.toFixed(4) || '0.00'}`,
-      emailVerified: batchJob.email_verified || false
+      email_verified: batchJob.email_verified || false
     };
     trackerData.jobs.push(newJob);
   }
