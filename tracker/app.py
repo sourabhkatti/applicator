@@ -85,6 +85,18 @@ def get_config():
     })
 
 
+@app.route('/api/auth_token', methods=['GET'])
+def get_auth_token():
+    """Get Supabase auth token for Edge Function calls.
+
+    In Flask context, this would integrate with session-based auth.
+    For now, returns empty since the extension uses chrome.storage auth.
+    """
+    # This endpoint is a fallback for localhost context
+    # The extension will use chrome.storage.local['supabase_auth'] instead
+    return jsonify({'token': ''})
+
+
 @app.route('/api/config', methods=['POST'])
 def save_config():
     """Save the applicant configuration."""

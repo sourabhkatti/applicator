@@ -673,31 +673,6 @@ async function updateParsingStep(stepNumber, status, progress) {
 async function parseResumeWithAI(resumeText) {
   const SUPABASE_URL = 'https://diplqphbqlomcvlujcxd.supabase.co';
 
-  // For now, return mock parsed data since we haven't deployed the edge function yet
-  // TODO: Replace with actual API call once edge function is deployed
-
-  // Simulate API delay
-  await sleep(1500);
-
-  // Mock parsed data - in production this comes from OpenRouter
-  return {
-    full_name: "John Doe",
-    email: "john@example.com",
-    phone: "+1 (555) 123-4567",
-    location: "San Francisco, CA",
-    linkedin_url: "https://linkedin.com/in/johndoe",
-    portfolio_url: null,
-    current_or_recent_title: "Senior Software Engineer",
-    current_or_recent_company: "Tech Corp",
-    years_of_experience: 5,
-    work_history: [],
-    education: [],
-    skills: ["JavaScript", "Python", "React"],
-    summary: "Experienced software engineer with 5 years of experience",
-    resume_text: resumeText
-  };
-
-  /* Production code (uncomment when edge function is ready):
   try {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/peebo-parse-resume`, {
       method: 'POST',
@@ -713,11 +688,27 @@ async function parseResumeWithAI(resumeText) {
     }
 
     return await response.json();
+
   } catch (error) {
-    console.error('AI parsing error:', error);
-    throw error;
+    console.error('Resume parsing failed:', error);
+    // Return minimal fallback (user can fill in manually)
+    return {
+      full_name: "",
+      email: "",
+      phone: "",
+      location: "",
+      linkedin_url: "",
+      portfolio_url: null,
+      current_or_recent_title: "",
+      current_or_recent_company: "",
+      years_of_experience: 0,
+      work_history: [],
+      education: [],
+      skills: [],
+      summary: "",
+      resume_text: resumeText
+    };
   }
-  */
 }
 
 async function autoFillFormFieldsWithAnimation(parsedData) {

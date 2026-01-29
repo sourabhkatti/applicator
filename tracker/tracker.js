@@ -2578,10 +2578,47 @@ async function startBatch() {
   try {
     const criteria = trackerData.settings?.applicant || {};
 
-    // For now, create a mock session (real implementation would call the Edge Function)
-    const sessionId = generateUUID();
+    // Get Supabase auth token
+    const authToken = await getSupabaseAuthToken();
+    if (!authToken) {
+      throw new Error('Not authenticated. Please sign in to Peebo first.');
+    }
+
+    // Call REAL Edge Function
+    const response = await fetch('https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/start', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({
+        target_count: batchConfig.targetCount,
+        criteria: {
+          target_roles: batchConfig.targetRoles || criteria.target_roles || [],
+          location: batchConfig.location || criteria.location_preference || 'Remote',
+          salary_min: batchConfig.salaryMin || criteria.salary_minimum || null,
+          industries: batchConfig.industries || criteria.industries || []
+        },
+        resume_text: criteria.resume_text || '',
+        user_info: {
+          name: criteria.name || '',
+          email: criteria.email || '',
+          phone: criteria.phone || '',
+          linkedin: criteria.linkedin_url || ''
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to start batch');
+    }
+
+    const result = await response.json();
+
+    // Store session ID for polling
     batchSession = {
-      id: sessionId,
+      id: result.session_id,
       status: 'scraping',
       created_at: new Date().toISOString(),
       started_at: new Date().toISOString(),
@@ -2605,17 +2642,12 @@ async function startBatch() {
     batchPanelState = 'scraping';
     renderBatchPanel();
 
-    // Start polling for status
+    // Start REAL polling
     startBatchPolling();
-
-    // Simulate job discovery (in real implementation, Edge Function handles this)
-    setTimeout(() => {
-      simulateJobDiscovery();
-    }, 3000);
 
   } catch (error) {
     console.error('[Batch] Start error:', error);
-    showError('Failed to start batch. Please try again.');
+    showError(`Failed to start batch: ${error.message}`);
     btn.disabled = false;
     btn.innerHTML = `
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
@@ -2627,195 +2659,165 @@ async function startBatch() {
 }
 
 /**
- * Simulate job discovery (for demo/testing)
+ * Get Supabase auth token from chrome.storage or Flask session
  */
-function simulateJobDiscovery() {
-  if (!batchSession) return;
+async function getSupabaseAuthToken() {
+  // Try chrome.storage first (extension context)
+  if (typeof chrome !== 'undefined' && chrome.storage) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['supabase_auth'], (result) => {
+        resolve(result.supabase_auth?.access_token || '');
+      });
+    });
+  }
 
-  const mockJobs = [
-    { company: 'Stripe', role: 'Senior Product Manager' },
-    { company: 'Notion', role: 'Product Manager, Growth' },
-    { company: 'Linear', role: 'Staff Product Manager' },
-    { company: 'Figma', role: 'Product Manager' },
-    { company: 'Vercel', role: 'Senior PM, Platform' }
-  ];
-
-  batchSession.jobs = mockJobs.slice(0, batchConfig.targetCount).map((job, i) => ({
-    id: generateUUID(),
-    position: i + 1,
-    company: job.company,
-    role: job.role,
-    job_url: `https://jobs.lever.co/${job.company.toLowerCase()}`,
-    status: i === 0 ? 'running' : 'queued',
-    browser_use_task_id: null,
-    live_url: null,
-    started_at: i === 0 ? new Date().toISOString() : null,
-    completed_at: null,
-    current_step: i === 0 ? 'Navigating to application...' : null,
-    agent_success: null,
-    email_verified: false,
-    error_message: null,
-    cost: 0,
-    tracker_job_id: null
-  }));
-
-  batchSession.status = 'active';
-  trackerData.settings.batch_session = batchSession;
-  storage.save(trackerData);
-
-  batchPanelState = 'active';
-  renderBatchPanel();
-
-  // Simulate job progress
-  simulateJobProgress();
+  // Fall back to Flask session (localhost context)
+  try {
+    const response = await fetch('/api/auth_token');
+    const data = await response.json();
+    return data.token || '';
+  } catch {
+    return '';
+  }
 }
 
 /**
- * Simulate job progress (for demo/testing)
+ * Add a successful batch job to the tracker's jobs list
  */
-function simulateJobProgress() {
-  if (!batchSession) return;
+async function addBatchJobToTracker(batchJob) {
+  if (!batchJob.agent_success) return;
 
-  const steps = [
-    'Navigating to application...',
-    'Filling out form fields...',
-    'Uploading resume...',
-    'Answering screening questions...',
-    'Submitting application...'
-  ];
+  // Check if job already exists
+  const existingJob = trackerData.jobs.find(j =>
+    j.jobUrl === batchJob.job_url ||
+    (j.company === batchJob.company && j.role === batchJob.role)
+  );
 
-  let stepIndex = 0;
-  let currentJobIndex = 0;
+  if (existingJob) {
+    // Update existing job
+    existingJob.status = 'applied';
+    existingJob.lastActivityDate = new Date().toISOString().split('T')[0];
+    existingJob.notes = (existingJob.notes || '') + `\n[Batch] Applied via Peebo on ${new Date().toLocaleDateString()}`;
+  } else {
+    // Create new job entry
+    const newJob = {
+      id: generateUUID(),
+      company: batchJob.company,
+      role: batchJob.role,
+      status: 'applied',
+      dateApplied: new Date().toISOString().split('T')[0],
+      lastActivityDate: new Date().toISOString().split('T')[0],
+      jobUrl: batchJob.job_url,
+      nextAction: 'Wait for response',
+      notes: `Applied via Peebo batch apply. Cost: $${batchJob.cost?.toFixed(4) || '0.00'}`,
+      emailVerified: batchJob.email_verified || false
+    };
+    trackerData.jobs.push(newJob);
+  }
 
-  const progressInterval = setInterval(() => {
-    if (!batchSession || batchSession.status !== 'active') {
-      clearInterval(progressInterval);
-      return;
+  await storage.save(trackerData);
+}
+
+/**
+ * Check AgentMail for confirmation emails
+ */
+async function checkAgentMailVerification() {
+  try {
+    // Trigger AgentMail sync via Flask endpoint
+    const response = await fetch('/api/trigger_email_sync', { method: 'POST' });
+    if (response.ok) {
+      // Reload data to get email_verified updates
+      await refreshUI();
     }
-
-    const runningJob = batchSession.jobs.find(j => j.status === 'running');
-    if (!runningJob) {
-      // Check if all done
-      const allDone = batchSession.jobs.every(j =>
-        j.status === 'success' || j.status === 'failed' || j.status === 'stopped'
-      );
-
-      if (allDone) {
-        batchSession.status = 'complete';
-        batchSession.completed_at = new Date().toISOString();
-        batchSession.completed_count = batchSession.jobs.filter(j => j.status === 'success').length;
-        batchSession.failed_count = batchSession.jobs.filter(j => j.status === 'failed').length;
-        trackerData.settings.batch_session = batchSession;
-        storage.save(trackerData);
-
-        batchPanelState = 'complete';
-        renderBatchPanel();
-        updateBatchHeaderBar();
-        clearInterval(progressInterval);
-        stopBatchPolling();
-        return;
-      }
-
-      // Start next job
-      const nextJob = batchSession.jobs.find(j => j.status === 'queued');
-      if (nextJob) {
-        nextJob.status = 'running';
-        nextJob.started_at = new Date().toISOString();
-        nextJob.current_step = steps[0];
-        stepIndex = 0;
-      }
-    } else {
-      // Progress current job
-      stepIndex++;
-
-      if (stepIndex >= steps.length) {
-        // Complete this job
-        const isSuccess = Math.random() > 0.15; // 85% success rate for demo
-        runningJob.status = isSuccess ? 'success' : 'failed';
-        runningJob.agent_success = isSuccess;
-        runningJob.completed_at = new Date().toISOString();
-        runningJob.cost = 0.05 + Math.random() * 0.1;
-        runningJob.current_step = null;
-
-        if (!isSuccess) {
-          runningJob.error_message = 'CAPTCHA detected, unable to proceed';
-        }
-
-        // Randomly set email verified
-        if (isSuccess && Math.random() > 0.5) {
-          setTimeout(() => {
-            runningJob.email_verified = true;
-            trackerData.settings.batch_session = batchSession;
-            storage.save(trackerData);
-            if (currentPanel === 'batch') {
-              renderBatchPanel();
-            }
-          }, 5000);
-        }
-
-        // Update total cost
-        batchSession.total_cost = batchSession.jobs.reduce((sum, j) => sum + (j.cost || 0), 0);
-
-        stepIndex = 0;
-      } else {
-        runningJob.current_step = steps[stepIndex];
-      }
-    }
-
-    trackerData.settings.batch_session = batchSession;
-    storage.save(trackerData);
-
-    if (currentPanel === 'batch') {
-      renderBatchPanel();
-    }
-    updateBatchHeaderBar();
-
-  }, 2000);
+  } catch (error) {
+    console.error('[Batch] AgentMail sync error:', error);
+  }
 }
 
 /**
  * Stop all batch jobs
  */
 async function stopAllJobs() {
-  if (!batchSession) return;
-
+  if (!batchSession?.id) return;
   if (!confirm('Stop all remaining applications?')) return;
 
-  batchSession.jobs.forEach(job => {
-    if (job.status === 'queued' || job.status === 'running') {
-      job.status = 'stopped';
+  try {
+    const authToken = await getSupabaseAuthToken();
+
+    const response = await fetch(
+      `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/stop`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to stop batch');
     }
-  });
 
-  batchSession.status = 'stopped';
-  batchSession.completed_at = new Date().toISOString();
-  batchSession.completed_count = batchSession.jobs.filter(j => j.status === 'success').length;
-  batchSession.failed_count = batchSession.jobs.filter(j => j.status === 'failed').length;
+    // Update local state
+    batchSession.jobs.forEach(job => {
+      if (job.status === 'queued' || job.status === 'running') {
+        job.status = 'stopped';
+      }
+    });
 
-  trackerData.settings.batch_session = batchSession;
-  await storage.save(trackerData);
+    batchSession.status = 'stopped';
+    batchSession.completed_at = new Date().toISOString();
+    batchSession.completed_count = batchSession.jobs.filter(j => j.status === 'success').length;
+    batchSession.failed_count = batchSession.jobs.filter(j => j.status === 'failed').length;
 
-  stopBatchPolling();
-  updateBatchHeaderBar();
+    trackerData.settings.batch_session = batchSession;
+    await storage.save(trackerData);
 
-  batchPanelState = 'stopped';
-  renderBatchPanel();
+    stopBatchPolling();
+    updateBatchHeaderBar();
+
+    batchPanelState = 'stopped';
+    renderBatchPanel();
+
+  } catch (error) {
+    console.error('[Batch] Stop error:', error);
+    showError('Failed to stop batch. Please try again.');
+  }
 }
 
 /**
  * Stop a specific batch job
  */
 async function stopBatchJob(jobId) {
-  if (!batchSession) return;
+  if (!batchSession?.id) return;
 
   const job = batchSession.jobs.find(j => j.id === jobId);
   if (!job) return;
 
-  if (job.status === 'queued' || job.status === 'running') {
+  if (job.status !== 'queued' && job.status !== 'running') return;
+
+  try {
+    const authToken = await getSupabaseAuthToken();
+
+    const response = await fetch(
+      `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/job/${jobId}/stop`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to stop job');
+    }
+
+    // Update local state
     job.status = 'stopped';
     trackerData.settings.batch_session = batchSession;
     await storage.save(trackerData);
     renderBatchPanel();
+
+  } catch (error) {
+    console.error('[Batch] Stop job error:', error);
+    showError('Failed to stop job. Please try again.');
   }
 }
 
@@ -2823,30 +2825,48 @@ async function stopBatchJob(jobId) {
  * Retry a failed batch job
  */
 async function retryBatchJob(jobId) {
-  if (!batchSession) return;
+  if (!batchSession?.id) return;
 
   const job = batchSession.jobs.find(j => j.id === jobId);
   if (!job || job.status !== 'failed') return;
 
-  job.status = 'queued';
-  job.error_message = null;
-  job.started_at = null;
-  job.completed_at = null;
+  try {
+    const authToken = await getSupabaseAuthToken();
 
-  // If batch was complete/stopped, reactivate
-  if (batchSession.status === 'complete' || batchSession.status === 'stopped') {
-    batchSession.status = 'active';
-    startBatchPolling();
+    const response = await fetch(
+      `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/job/${jobId}/retry`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to retry job');
+    }
+
+    // Update local state
+    job.status = 'queued';
+    job.error_message = null;
+    job.started_at = null;
+    job.completed_at = null;
+
+    // Reactivate batch if needed
+    if (batchSession.status === 'complete' || batchSession.status === 'stopped') {
+      batchSession.status = 'active';
+      startBatchPolling();
+    }
+
+    trackerData.settings.batch_session = batchSession;
+    await storage.save(trackerData);
+
+    batchPanelState = 'active';
+    renderBatchPanel();
+
+  } catch (error) {
+    console.error('[Batch] Retry error:', error);
+    showError('Failed to retry job. Please try again.');
   }
-
-  trackerData.settings.batch_session = batchSession;
-  await storage.save(trackerData);
-
-  batchPanelState = 'active';
-  renderBatchPanel();
-
-  // Restart simulation
-  simulateJobProgress();
 }
 
 /**
@@ -2854,14 +2874,65 @@ async function retryBatchJob(jobId) {
  */
 function startBatchPolling() {
   if (batchPollInterval) return;
+  if (!batchSession?.id) return;
 
-  batchPollInterval = setInterval(() => {
-    // In real implementation, this would call the Edge Function
-    // For now, just update the header bar
-    updateBatchHeaderBar();
-  }, 5000);
+  batchPollInterval = setInterval(async () => {
+    try {
+      const authToken = await getSupabaseAuthToken();
 
-  console.log('[Batch] Polling started');
+      const response = await fetch(
+        `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/status`,
+        {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        }
+      );
+
+      if (!response.ok) {
+        console.error('[Batch] Polling failed:', response.status);
+        return;
+      }
+
+      const data = await response.json();
+
+      // Update local session from server
+      batchSession.status = data.status;
+      batchSession.jobs = data.jobs || [];
+      batchSession.total_cost = data.summary?.total_cost || 0;
+      batchSession.completed_count = data.summary?.completed || 0;
+      batchSession.failed_count = data.summary?.failed || 0;
+
+      trackerData.settings.batch_session = batchSession;
+      await storage.save(trackerData);
+
+      // Update UI based on status
+      if (data.status === 'active' && batchPanelState !== 'active') {
+        batchPanelState = 'active';
+      } else if (data.status === 'complete' || data.status === 'stopped') {
+        batchPanelState = data.status;
+        stopBatchPolling();
+
+        // Add successful jobs to tracker
+        for (const job of data.jobs || []) {
+          if (job.agent_success) {
+            await addBatchJobToTracker(job);
+          }
+        }
+
+        // Check AgentMail for email verification
+        await checkAgentMailVerification();
+      }
+
+      if (currentPanel === 'batch') {
+        renderBatchPanel();
+      }
+      updateBatchHeaderBar();
+
+    } catch (error) {
+      console.error('[Batch] Polling error:', error);
+    }
+  }, 5000); // Poll every 5 seconds
+
+  console.log('[Batch] Real polling started');
 }
 
 /**
