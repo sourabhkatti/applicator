@@ -93,8 +93,20 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url)
-  // Strip the full Supabase function path prefix
-  const path = url.pathname.replace(/^\/functions\/v1\/peebo-batch/, '')
+  // Get the path - Supabase passes the full URL, so we need to strip the prefix
+  // But also handle the case where Supabase has already stripped it
+  let path = url.pathname
+  if (path.startsWith('/functions/v1/peebo-batch')) {
+    path = path.replace('/functions/v1/peebo-batch', '')
+  }
+  // Ensure path starts with / if not empty
+  if (path && !path.startsWith('/')) {
+    path = '/' + path
+  }
+  // If path is empty, make it /
+  if (!path) {
+    path = '/'
+  }
 
   console.log('[peebo-batch] URL:', req.url)
   console.log('[peebo-batch] Pathname:', url.pathname)
