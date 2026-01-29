@@ -96,6 +96,11 @@ Deno.serve(async (req) => {
   // Strip the full Supabase function path prefix
   const path = url.pathname.replace(/^\/functions\/v1\/peebo-batch/, '')
 
+  console.log('[peebo-batch] URL:', req.url)
+  console.log('[peebo-batch] Pathname:', url.pathname)
+  console.log('[peebo-batch] Parsed path:', path)
+  console.log('[peebo-batch] Method:', req.method)
+
   try {
     // Get auth header
     const authHeader = req.headers.get('Authorization')
@@ -156,7 +161,8 @@ Deno.serve(async (req) => {
       return handleRetryJob(sessionId, jobId, supabase, peeboUser as PeeboUser)
     }
 
-    return jsonResponse({ error: 'Not found' }, 404)
+    console.error('[peebo-batch] No route matched for:', req.method, path)
+    return jsonResponse({ error: 'Not found', debug: { method: req.method, path } }, 404)
 
   } catch (error) {
     console.error('Peebo batch error:', error)

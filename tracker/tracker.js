@@ -1521,18 +1521,11 @@ function closeSidePanel() {
 }
 
 /**
- * Smart close handler - stops batch if active, otherwise just closes
+ * Smart close handler - closes panel without stopping the batch
+ * The Stop button is the only way to stop a batch
  */
 function handlePanelClose() {
-  // If batch is active/scraping, stop it first
-  if (currentPanel === 'batch' && batchSession &&
-      (batchSession.status === 'active' || batchSession.status === 'scraping')) {
-    stopBatchInstantly();
-    closeBatchPanel();
-    return;
-  }
-
-  // If in batch panel but not active, just close
+  // If in batch panel, use closeBatchPanel (shows header bar for active batch)
   if (currentPanel === 'batch') {
     closeBatchPanel();
     return;
