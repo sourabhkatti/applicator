@@ -711,14 +711,14 @@ function setupEventListeners() {
     openSidePanel('activity');
   });
 
-  // Panel close button
-  document.getElementById('panel-close').addEventListener('click', closeSidePanel);
+  // Panel close button - smart close based on what's open
+  document.getElementById('panel-close').addEventListener('click', handlePanelClose);
 
   // Panel back button
   document.getElementById('panel-back').addEventListener('click', navigateBack);
 
   // Panel backdrop click to close
-  document.getElementById('panel-backdrop').addEventListener('click', closeSidePanel);
+  document.getElementById('panel-backdrop').addEventListener('click', handlePanelClose);
 
   // Panel tab clicks
   document.querySelectorAll('.panel-tab').forEach(tab => {
@@ -1677,6 +1677,28 @@ function closeSidePanel() {
 }
 
 /**
+ * Smart close handler - stops batch if active, otherwise just closes
+ */
+function handlePanelClose() {
+  // If batch is active/scraping, stop it first
+  if (currentPanel === 'batch' && batchSession &&
+      (batchSession.status === 'active' || batchSession.status === 'scraping')) {
+    stopBatchInstantly();
+    closeBatchPanel();
+    return;
+  }
+
+  // If in batch panel but not active, just close
+  if (currentPanel === 'batch') {
+    closeBatchPanel();
+    return;
+  }
+
+  // Normal close for other panels
+  closeSidePanel();
+}
+
+/**
  * Navigate back in panel history
  */
 function navigateBack() {
@@ -2481,8 +2503,17 @@ function renderBatchScraping(container) {
         <span></span>
         <span></span>
       </div>
+      <button class="batch-control-btn batch-stop-btn" id="batch-stop-scraping">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <rect x="3" y="3" width="10" height="10" rx="1"/>
+        </svg>
+        Stop
+      </button>
     </div>
   `;
+
+  // Stop button - instant local update
+  document.getElementById('batch-stop-scraping')?.addEventListener('click', stopBatchInstantly);
 }
 
 /**
@@ -2529,15 +2560,38 @@ function renderBatchActive(container) {
           <span class="batch-cost">$${(batchSession.total_cost || 0).toFixed(2)}</span>
         </div>
 
-        <button class="batch-stop-all-btn" id="batch-stop-all-btn">
-          Stop all
-        </button>
+        <div class="batch-control-buttons">
+          ${batchSession.paused ? `
+            <button class="batch-control-btn batch-resume-btn" id="batch-resume-btn">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M4 2l10 6-10 6V2z"/>
+              </svg>
+              Resume
+            </button>
+          ` : `
+            <button class="batch-control-btn batch-pause-btn" id="batch-pause-btn">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="3" y="2" width="4" height="12" rx="1"/>
+                <rect x="9" y="2" width="4" height="12" rx="1"/>
+              </svg>
+              Pause
+            </button>
+          `}
+          <button class="batch-control-btn batch-stop-btn" id="batch-stop-all-btn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="3" y="3" width="10" height="10" rx="1"/>
+            </svg>
+            Stop
+          </button>
+        </div>
       </div>
     </div>
   `;
 
-  // Add event listeners
-  document.getElementById('batch-stop-all-btn')?.addEventListener('click', stopAllJobs);
+  // Add event listeners - instant local updates
+  document.getElementById('batch-stop-all-btn')?.addEventListener('click', stopBatchInstantly);
+  document.getElementById('batch-pause-btn')?.addEventListener('click', pauseBatchInstantly);
+  document.getElementById('batch-resume-btn')?.addEventListener('click', resumeBatchInstantly);
 
   // Add job action listeners
   jobs.forEach(job => {
@@ -2854,52 +2908,132 @@ async function checkAgentMailVerification() {
 }
 
 /**
- * Stop all batch jobs
+ * Stop batch INSTANTLY - updates UI immediately, then calls API in background
+ * No confirmation dialog for instant response
  */
-async function stopAllJobs() {
-  if (!batchSession?.id) return;
-  if (!confirm('Stop all remaining applications?')) return;
+async function stopBatchInstantly() {
+  if (!batchSession) return;
 
-  try {
-    const authToken = await getSupabaseAuthToken();
+  console.log('[Batch] Stopping instantly...');
 
-    const response = await fetch(
-      `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/stop`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error('Failed to stop batch');
-    }
-
-    // Update local state
+  // INSTANT: Update local state immediately
+  if (batchSession.jobs) {
     batchSession.jobs.forEach(job => {
       if (job.status === 'queued' || job.status === 'running') {
         job.status = 'stopped';
       }
     });
-
-    batchSession.status = 'stopped';
-    batchSession.completed_at = new Date().toISOString();
-    batchSession.completed_count = batchSession.jobs.filter(j => j.status === 'success').length;
-    batchSession.failed_count = batchSession.jobs.filter(j => j.status === 'failed').length;
-
-    trackerData.settings.batch_session = batchSession;
-    await storage.save(trackerData);
-
-    stopBatchPolling();
-    updateBatchHeaderBar();
-
-    batchPanelState = 'stopped';
-    renderBatchPanel();
-
-  } catch (error) {
-    console.error('[Batch] Stop error:', error);
-    showError('Failed to stop batch. Please try again.');
   }
+
+  batchSession.status = 'stopped';
+  batchSession.completed_at = new Date().toISOString();
+  batchSession.completed_count = batchSession.jobs?.filter(j => j.status === 'success').length || 0;
+  batchSession.failed_count = batchSession.jobs?.filter(j => j.status === 'failed').length || 0;
+
+  // Stop polling immediately
+  stopBatchPolling();
+
+  // Update UI immediately
+  batchPanelState = 'stopped';
+  renderBatchPanel();
+  updateBatchHeaderBar();
+
+  // Save state
+  trackerData.settings.batch_session = batchSession;
+  await storage.save(trackerData);
+
+  // BACKGROUND: Call API (don't wait for response)
+  if (batchSession.id) {
+    getSupabaseAuthToken().then(authToken => {
+      fetch(
+        `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/stop`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        }
+      ).catch(err => console.error('[Batch] API stop error:', err));
+    });
+  }
+}
+
+/**
+ * Pause batch INSTANTLY - stops processing but allows resume
+ */
+async function pauseBatchInstantly() {
+  if (!batchSession) return;
+
+  console.log('[Batch] Pausing instantly...');
+
+  // INSTANT: Mark as paused locally
+  batchSession.paused = true;
+
+  // Stop polling (will resume when unpaused)
+  stopBatchPolling();
+
+  // Update UI immediately
+  renderBatchPanel();
+  updateBatchHeaderBar();
+
+  // Save state
+  trackerData.settings.batch_session = batchSession;
+  await storage.save(trackerData);
+
+  // BACKGROUND: Call API to pause (if endpoint exists)
+  if (batchSession.id) {
+    getSupabaseAuthToken().then(authToken => {
+      fetch(
+        `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/pause`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        }
+      ).catch(err => console.log('[Batch] API pause (optional):', err.message));
+    });
+  }
+}
+
+/**
+ * Resume batch INSTANTLY
+ */
+async function resumeBatchInstantly() {
+  if (!batchSession) return;
+
+  console.log('[Batch] Resuming instantly...');
+
+  // INSTANT: Mark as not paused
+  batchSession.paused = false;
+
+  // Restart polling
+  startBatchPolling();
+
+  // Update UI immediately
+  renderBatchPanel();
+  updateBatchHeaderBar();
+
+  // Save state
+  trackerData.settings.batch_session = batchSession;
+  await storage.save(trackerData);
+
+  // BACKGROUND: Call API to resume (if endpoint exists)
+  if (batchSession.id) {
+    getSupabaseAuthToken().then(authToken => {
+      fetch(
+        `https://diplqphbqlomcvlujcxd.supabase.co/functions/v1/peebo-batch/${batchSession.id}/resume`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        }
+      ).catch(err => console.log('[Batch] API resume (optional):', err.message));
+    });
+  }
+}
+
+/**
+ * Stop all batch jobs (legacy - with confirmation)
+ */
+async function stopAllJobs() {
+  // Just use the instant version now
+  stopBatchInstantly();
 }
 
 /**

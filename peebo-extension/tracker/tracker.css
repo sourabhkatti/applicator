@@ -2776,6 +2776,66 @@ html, body {
   background: #FECACA;
 }
 
+/* Batch Control Buttons */
+.batch-control-buttons {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: var(--space-3);
+}
+
+.batch-control-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.batch-control-btn svg {
+  flex-shrink: 0;
+}
+
+.batch-stop-btn {
+  color: var(--status-rejected);
+  background: #FEE2E2;
+  border-color: #FECACA;
+}
+
+.batch-stop-btn:hover {
+  background: #FECACA;
+}
+
+.batch-pause-btn {
+  color: var(--status-interviewing);
+  background: #FEF3C7;
+  border-color: #FDE68A;
+}
+
+.batch-pause-btn:hover {
+  background: #FDE68A;
+}
+
+.batch-resume-btn {
+  color: var(--status-offer);
+  background: #D1FAE5;
+  border-color: #A7F3D0;
+}
+
+.batch-resume-btn:hover {
+  background: #A7F3D0;
+}
+
+/* Stop button in scraping state */
+.batch-scraping .batch-control-btn {
+  margin-top: var(--space-4);
+}
+
 /* ============================================
    BATCH COMPLETE STATE
    ============================================ */
