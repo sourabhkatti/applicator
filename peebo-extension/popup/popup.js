@@ -50,11 +50,11 @@ function setupEventListeners() {
 
   // Navigation - open extension's tracker page (has access to chrome.storage)
   trackerBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('tracker/index.html') });
+    chrome.tabs.create({ url: chrome.runtime.getURL('tracker/tracker.html') });
   });
 
   historyBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('tracker/index.html?view=history') });
+    chrome.tabs.create({ url: chrome.runtime.getURL('tracker/tracker.html?view=history') });
   });
 
   settingsBtn.addEventListener('click', () => {
