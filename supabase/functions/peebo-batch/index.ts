@@ -93,7 +93,8 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url)
-  const path = url.pathname.replace('/peebo-batch', '')
+  // Strip the full Supabase function path prefix
+  const path = url.pathname.replace(/^\/functions\/v1\/peebo-batch/, '')
 
   try {
     // Get auth header
