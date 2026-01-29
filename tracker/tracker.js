@@ -25,6 +25,26 @@ let hasUnreadActivity = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[Tracker] Initializing...');
+
+  // Check for OAuth tokens in URL (after Supabase redirect)
+  const hashParams = new URLSearchParams(window.location.hash.substring(1));
+  const accessToken = hashParams.get('access_token');
+
+  if (accessToken) {
+    console.log('[Auth] Found OAuth tokens in URL, saving to localStorage...');
+    const session = {
+      access_token: accessToken,
+      refresh_token: hashParams.get('refresh_token'),
+      expires_in: parseInt(hashParams.get('expires_in')) || 3600,
+      token_type: hashParams.get('token_type') || 'bearer'
+    };
+    localStorage.setItem('supabase_session', JSON.stringify(session));
+
+    // Clean URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+    console.log('[Auth] Session saved to localStorage');
+  }
+
   await init();
 });
 
@@ -2659,7 +2679,7 @@ async function startBatch() {
 }
 
 /**
- * Get Supabase auth token from chrome.storage or Flask session
+ * Get Supabase auth token from chrome.storage, localStorage, or Flask session
  */
 async function getSupabaseAuthToken() {
   // Try chrome.storage first (extension context)
@@ -2671,7 +2691,21 @@ async function getSupabaseAuthToken() {
     });
   }
 
-  // Fall back to Flask session (localhost context)
+  // Try localStorage (Flask/localhost context after OAuth redirect)
+  try {
+    const sessionStr = localStorage.getItem('supabase_session');
+    if (sessionStr) {
+      const session = JSON.parse(sessionStr);
+      if (session.access_token) {
+        console.log('[Auth] Found token in localStorage');
+        return session.access_token;
+      }
+    }
+  } catch (e) {
+    console.error('[Auth] Failed to read localStorage:', e);
+  }
+
+  // Fall back to Flask session
   try {
     const response = await fetch('/api/auth_token');
     const data = await response.json();
