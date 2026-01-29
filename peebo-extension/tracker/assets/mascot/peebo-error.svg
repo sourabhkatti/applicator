@@ -1,0 +1,59 @@
+<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Body (slightly tilted/confused) -->
+  <ellipse cx="62" cy="72" rx="40" ry="35" fill="#FFD93D" transform="rotate(5 62 72)"/>
+  <ellipse cx="62" cy="72" rx="40" ry="35" fill="url(#bodyGradient)" transform="rotate(5 62 72)"/>
+
+  <!-- Belly -->
+  <ellipse cx="62" cy="80" rx="28" ry="22" fill="#FFF3C4" transform="rotate(5 62 80)"/>
+
+  <!-- Left Wing (droopy) -->
+  <ellipse cx="28" cy="75" rx="12" ry="18" fill="#FFCC00" transform="rotate(10 28 75)"/>
+
+  <!-- Right Wing (droopy) -->
+  <ellipse cx="96" cy="78" rx="12" ry="18" fill="#FFCC00" transform="rotate(-5 96 78)"/>
+
+  <!-- Head feather tuft (droopy/confused) -->
+  <path d="M58 42 Q62 35 66 44" stroke="#FFCC00" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M52 46 Q56 40 60 48" stroke="#FFCC00" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- Left Eye (worried) -->
+  <circle cx="47" cy="60" r="10" fill="white"/>
+  <circle cx="49" cy="62" r="6" fill="#3D3428"/>
+  <circle cx="51" cy="60" r="2" fill="white"/>
+
+  <!-- Right Eye (worried) -->
+  <circle cx="77" cy="58" r="10" fill="white"/>
+  <circle cx="75" cy="60" r="6" fill="#3D3428"/>
+  <circle cx="77" cy="58" r="2" fill="white"/>
+
+  <!-- Worried eyebrows -->
+  <path d="M40 50 L54 54" stroke="#3D3428" stroke-width="2" stroke-linecap="round"/>
+  <path d="M84 48 L70 54" stroke="#3D3428" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Beak (slightly frowning) -->
+  <path d="M57 70 L62 80 L67 70 Z" fill="#FF8A65"/>
+  <path d="M53 78 Q60 72 67 78" stroke="#3D3428" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- Feet -->
+  <path d="M50 104 L47 110 M50 104 L50 112 M50 104 L53 110" stroke="#FF8A65" stroke-width="3" stroke-linecap="round"/>
+  <path d="M74 103 L71 109 M74 103 L74 111 M74 103 L77 109" stroke="#FF8A65" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Question mark -->
+  <path d="M95 25 Q100 20 100 28 Q100 33 95 35 L95 38" stroke="#FF8A80" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <circle cx="95" cy="43" r="2" fill="#FF8A80"/>
+
+  <!-- Sweat drops -->
+  <path d="M30 48 Q33 53 30 58 Q27 53 30 48" fill="#6EC6FF"/>
+  <path d="M90 42 Q92 46 90 50 Q88 46 90 42" fill="#6EC6FF"/>
+
+  <!-- Concern blush -->
+  <ellipse cx="34" cy="72" rx="6" ry="4" fill="#FF8A80" opacity="0.4"/>
+  <ellipse cx="90" cy="70" rx="6" ry="4" fill="#FF8A80" opacity="0.4"/>
+
+  <defs>
+    <radialGradient id="bodyGradient" cx="0.5" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#FFE082"/>
+      <stop offset="100%" stop-color="#FFD93D"/>
+    </radialGradient>
+  </defs>
+</svg>

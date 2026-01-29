@@ -166,21 +166,19 @@ function createActiveJobCard(task) {
 
 async function cancelTask(taskId) {
   try {
-    const response = await fetch('/api/cancel_task', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId })
-    });
+    // Update task status in chrome.storage
+    const data = await storage.load();
+    const activeTasks = data.settings?.active_tasks || {};
 
-    const result = await response.json();
-
-    if (response.ok) {
+    if (activeTasks[taskId]) {
+      activeTasks[taskId].status = 'cancelled';
+      activeTasks[taskId].error_message = 'Task cancelled by user';
+      activeTasks[taskId].updated_at = new Date().toISOString();
+      await storage.save(data);
       console.log(`[Tracker] Task ${taskId} cancelled`);
-      // Refresh immediately to show cancelled status
       await refreshUI();
     } else {
-      console.error('[Tracker] Cancel failed:', result.error);
-      showError(`Failed to cancel task: ${result.error}`);
+      showError('Task not found');
     }
   } catch (error) {
     console.error('[Tracker] Cancel error:', error);
@@ -190,21 +188,17 @@ async function cancelTask(taskId) {
 
 async function dismissTask(taskId) {
   try {
-    const response = await fetch('/api/remove_task', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId })
-    });
+    // Remove task from chrome.storage
+    const data = await storage.load();
+    const activeTasks = data.settings?.active_tasks || {};
 
-    const result = await response.json();
-
-    if (response.ok) {
+    if (activeTasks[taskId]) {
+      delete activeTasks[taskId];
+      await storage.save(data);
       console.log(`[Tracker] Task ${taskId} dismissed`);
-      // Refresh to remove from UI
       await refreshUI();
     } else {
-      console.error('[Tracker] Dismiss failed:', result.error);
-      showError(`Failed to dismiss task: ${result.error}`);
+      showError('Task not found');
     }
   } catch (error) {
     console.error('[Tracker] Dismiss error:', error);
@@ -2201,14 +2195,6 @@ function renderBatchPanel() {
 function renderBatchSetup(container) {
   // Load criteria from settings or applicant config
   const criteria = trackerData.settings?.applicant || {};
-  const savedCriteria = trackerData.settings?.batchCriteria || {};
-
-  // Use saved criteria or defaults
-  const roles = savedCriteria.roles || (criteria.target_roles || ['Product Manager']).join(', ');
-  const location = savedCriteria.location || criteria.location_preference || 'Remote';
-  const workType = savedCriteria.workType || 'remote';
-  const salary = savedCriteria.salary || Math.round((criteria.salary_minimum || 150000) / 1000);
-  const industries = savedCriteria.industries || (criteria.industries || ['Tech']).join(', ');
 
   container.innerHTML = `
     <div class="batch-setup">
@@ -2229,39 +2215,22 @@ function renderBatchSetup(container) {
           <span class="batch-section-icon">📋</span>
           <span class="batch-section-title">Your criteria</span>
         </div>
-        <div class="batch-criteria-form">
-          <div class="batch-criteria-row">
-            <label class="batch-criteria-label">Roles</label>
-            <input type="text" class="batch-criteria-input" id="batch-roles"
-              value="${escapeHtml(roles)}" placeholder="e.g., Product Manager, Sr PM">
+        <div class="batch-info-card">
+          <div class="batch-info-row">
+            <span class="batch-info-label">Roles</span>
+            <span class="batch-info-value">${(criteria.target_roles || ['Product Manager']).join(', ')}</span>
           </div>
-          <div class="batch-criteria-row">
-            <label class="batch-criteria-label">Location</label>
-            <input type="text" class="batch-criteria-input" id="batch-location"
-              value="${escapeHtml(location)}" placeholder="e.g., San Francisco, NYC, Remote">
+          <div class="batch-info-row">
+            <span class="batch-info-label">Location</span>
+            <span class="batch-info-value">${criteria.location_preference || 'Remote'}</span>
           </div>
-          <div class="batch-criteria-row">
-            <label class="batch-criteria-label">Work type</label>
-            <select class="batch-criteria-input" id="batch-work-type">
-              <option value="remote" ${workType === 'remote' ? 'selected' : ''}>Remote</option>
-              <option value="hybrid" ${workType === 'hybrid' ? 'selected' : ''}>Hybrid</option>
-              <option value="onsite" ${workType === 'onsite' ? 'selected' : ''}>On-site</option>
-              <option value="any" ${workType === 'any' ? 'selected' : ''}>Any</option>
-            </select>
+          <div class="batch-info-row">
+            <span class="batch-info-label">Salary</span>
+            <span class="batch-info-value">$${Math.round((criteria.salary_minimum || 150000) / 1000)}k+</span>
           </div>
-          <div class="batch-criteria-row">
-            <label class="batch-criteria-label">Min salary</label>
-            <div class="batch-salary-input">
-              <span class="batch-salary-prefix">$</span>
-              <input type="number" class="batch-criteria-input" id="batch-salary"
-                value="${salary}" placeholder="150" min="0" step="10">
-              <span class="batch-salary-suffix">k+</span>
-            </div>
-          </div>
-          <div class="batch-criteria-row">
-            <label class="batch-criteria-label">Industries</label>
-            <input type="text" class="batch-criteria-input" id="batch-industries"
-              value="${escapeHtml(industries)}" placeholder="e.g., Tech, Software, Fintech">
+          <div class="batch-info-row">
+            <span class="batch-info-label">Industries</span>
+            <span class="batch-info-value">${(criteria.industries || ['Tech']).join(', ')}</span>
           </div>
         </div>
       </div>
@@ -2311,23 +2280,6 @@ function renderBatchSetup(container) {
     batchConfig.targetCount = value;
     document.getElementById('batch-estimate').textContent =
       `~${estimateBatchTime(value)} minutes total`;
-  });
-
-  // Save criteria on change
-  const saveCriteria = async () => {
-    const criteria = {
-      roles: document.getElementById('batch-roles').value.trim(),
-      location: document.getElementById('batch-location').value.trim(),
-      workType: document.getElementById('batch-work-type').value,
-      salary: parseInt(document.getElementById('batch-salary').value) || 150,
-      industries: document.getElementById('batch-industries').value.trim()
-    };
-    trackerData.settings.batchCriteria = criteria;
-    await storage.save(trackerData);
-  };
-
-  ['batch-roles', 'batch-location', 'batch-work-type', 'batch-salary', 'batch-industries'].forEach(id => {
-    document.getElementById(id).addEventListener('change', saveCriteria);
   });
 
   document.getElementById('batch-start-btn').addEventListener('click', startBatch);
