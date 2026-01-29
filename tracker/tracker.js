@@ -2665,8 +2665,8 @@ async function getSupabaseAuthToken() {
   // Try chrome.storage first (extension context)
   if (typeof chrome !== 'undefined' && chrome.storage) {
     return new Promise((resolve) => {
-      chrome.storage.local.get(['supabase_auth'], (result) => {
-        resolve(result.supabase_auth?.access_token || '');
+      chrome.storage.local.get(['session'], (result) => {
+        resolve(result.session?.access_token || '');
       });
     });
   }
