@@ -436,7 +436,7 @@ async function broadcastToTrackers(message) {
   try {
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes('tracker/tracker.html')) {
+      if (tab.url && tab.url.includes('localhost:8080')) {
         chrome.tabs.sendMessage(tab.id, message).catch(() => {
           // Ignore errors for closed tabs
         });

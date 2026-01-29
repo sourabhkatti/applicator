@@ -50,11 +50,11 @@ function setupEventListeners() {
 
   // Navigation
   trackerBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('tracker/tracker.html') });
+    chrome.tabs.create({ url: 'http://localhost:8080' });
   });
 
   historyBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('tracker/tracker.html?view=history') });
+    chrome.tabs.create({ url: 'http://localhost:8080?view=history' });
   });
 
   settingsBtn.addEventListener('click', () => {

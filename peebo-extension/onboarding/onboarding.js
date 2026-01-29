@@ -86,7 +86,7 @@ function setupEventListeners() {
     window.close();
   });
   document.getElementById('view-tracker-btn').addEventListener('click', () => {
-    chrome.tabs.update({ url: chrome.runtime.getURL('tracker/tracker.html') });
+    chrome.tabs.create({ url: 'http://localhost:8080' });
   });
 
   // AgentMail settings toggle
