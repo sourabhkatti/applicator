@@ -4,6 +4,167 @@
  */
 
 // ============================================
+// SUPABASE AUTH (using fetch API directly)
+// ============================================
+
+const SUPABASE_URL = 'https://diplqphbqlomcvlujcxd.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRpcGxxcGhicWxvbWN2bHVqY3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY3OTQ2NzAsImV4cCI6MjA1MjM3MDY3MH0.R9N7pNLORH8xWplNB4DNinAjCiPpqkjrewfcJpLXKhM';
+
+// Initialize (no-op without Supabase client, using fetch instead)
+function initSupabase() {
+  console.log('[Auth] Using fetch-based auth');
+}
+
+// Check for existing session
+async function checkSession() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['session'], (result) => {
+      if (result.session?.access_token) {
+        console.log('[Auth] Found existing session');
+        resolve(result.session);
+      } else {
+        console.log('[Auth] No session found');
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Save session to chrome.storage
+async function saveSession(session) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ session }, () => {
+      console.log('[Auth] Session saved');
+      resolve();
+    });
+  });
+}
+
+// Show auth overlay
+function showAuthOverlay() {
+  document.getElementById('auth-overlay')?.classList.remove('hidden');
+}
+
+// Hide auth overlay
+function hideAuthOverlay() {
+  document.getElementById('auth-overlay')?.classList.add('hidden');
+}
+
+// Show auth error
+function showAuthError(message, isSuccess = false) {
+  const errorEl = document.getElementById('auth-error');
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+    errorEl.style.color = isSuccess ? 'var(--success)' : 'var(--error)';
+  }
+}
+
+// Handle Google Sign-In (opens Supabase OAuth URL)
+async function handleGoogleSignIn() {
+  const redirectTo = encodeURIComponent(chrome.runtime.getURL('tracker/tracker.html'));
+  const authUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`;
+
+  // Open in new tab (OAuth requires full page redirect)
+  chrome.tabs.create({ url: authUrl });
+}
+
+// Handle Magic Link
+async function handleMagicLink() {
+  const email = document.getElementById('email-input')?.value?.trim();
+  if (!email) {
+    showAuthError('Please enter your email');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        email,
+        create_user: true,
+        options: {
+          emailRedirectTo: chrome.runtime.getURL('tracker/tracker.html')
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error_description || error.msg || 'Failed to send magic link');
+    }
+
+    showAuthError('Check your email for the magic link!', true);
+  } catch (error) {
+    console.error('[Auth] Magic link error:', error);
+    showAuthError(error.message || 'Failed to send magic link');
+  }
+}
+
+// Handle auth callback (after OAuth redirect)
+async function handleAuthCallback() {
+  // Check URL for auth tokens (Supabase adds these after OAuth)
+  const hashParams = new URLSearchParams(window.location.hash.substring(1));
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
+  const expiresIn = hashParams.get('expires_in');
+  const tokenType = hashParams.get('token_type');
+
+  if (accessToken) {
+    console.log('[Auth] Found tokens in URL, saving session...');
+
+    // Get user info
+    try {
+      const userResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': SUPABASE_ANON_KEY
+        }
+      });
+
+      let user = null;
+      if (userResponse.ok) {
+        user = await userResponse.json();
+      }
+
+      const session = {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: parseInt(expiresIn) || 3600,
+        token_type: tokenType || 'bearer',
+        user
+      };
+
+      await saveSession(session);
+
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+
+      return session;
+    } catch (error) {
+      console.error('[Auth] Failed to get user info:', error);
+    }
+  }
+
+  return null;
+}
+
+// Setup auth event listeners
+function setupAuthListeners() {
+  document.getElementById('google-signin-btn')?.addEventListener('click', handleGoogleSignIn);
+  document.getElementById('magic-link-btn')?.addEventListener('click', handleMagicLink);
+
+  // Handle Enter key on email input
+  document.getElementById('email-input')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') handleMagicLink();
+  });
+}
+
+// ============================================
 // GLOBAL STATE
 // ============================================
 
@@ -25,6 +186,27 @@ let hasUnreadActivity = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[Tracker] Initializing...');
+
+  // Initialize Supabase
+  initSupabase();
+
+  // Setup auth listeners
+  setupAuthListeners();
+
+  // Check for OAuth callback first
+  let session = await handleAuthCallback();
+
+  // If no session from callback, check storage
+  if (!session) {
+    session = await checkSession();
+  }
+
+  // If still no session, show auth overlay (but still init tracker for viewing)
+  if (!session) {
+    console.log('[Tracker] No session, showing auth overlay');
+    showAuthOverlay();
+  }
+
   await init();
 });
 
