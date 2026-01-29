@@ -43,6 +43,8 @@ interface BatchJob {
   error_message: string | null
   cost: number
   tracker_job_id: string | null
+  job_description: string | null
+  tailored_resume: string | null
 }
 
 interface StartBatchRequest {
@@ -498,7 +500,9 @@ async function pollScraperResults(
           email_verified: false,
           error_message: null,
           cost: 0,
-          tracker_job_id: null
+          tracker_job_id: null,
+          job_description: null,
+          tailored_resume: null
         }))
 
         session.status = 'active'
@@ -542,6 +546,146 @@ function parseScraperResults(output: string, maxJobs: number): Array<{ company: 
   return []
 }
 
+// Fetch job description using browser-use
+async function fetchJobDescription(jobUrl: string, apiKey: string): Promise<string> {
+  try {
+    const task = `
+Navigate to ${jobUrl} and extract the full job description.
+
+Return ONLY the job description text including:
+- Job title and company
+- Responsibilities/duties
+- Requirements/qualifications
+- Skills required
+- Any other relevant details
+
+Format the output as plain text, not JSON.
+`.trim()
+
+    const response = await fetch('https://api.browser-use.com/api/v1/run-task', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        task,
+        save_browser_data: false
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to start job description fetch')
+    }
+
+    const result = await response.json()
+    const taskId = result.id
+
+    // Poll for completion (max 2 minutes)
+    for (let i = 0; i < 24; i++) {
+      await new Promise(resolve => setTimeout(resolve, 5000))
+
+      const statusResponse = await fetch(`https://api.browser-use.com/api/v1/task/${taskId}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      })
+
+      if (!statusResponse.ok) continue
+
+      const statusResult = await statusResponse.json()
+
+      if (statusResult.status === 'completed') {
+        return statusResult.output || ''
+      }
+
+      if (statusResult.status === 'failed') {
+        throw new Error(statusResult.error || 'Failed to fetch job description')
+      }
+    }
+
+    throw new Error('Job description fetch timed out')
+  } catch (error) {
+    console.error('Error fetching job description:', error)
+    return ''
+  }
+}
+
+// Tailor resume for a specific job using OpenRouter
+async function tailorResumeForJob(
+  baseResume: string,
+  jobDescription: string,
+  jobRole: string,
+  company: string
+): Promise<string> {
+  const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
+  if (!openrouterKey) {
+    console.log('OpenRouter API key not configured, using base resume')
+    return baseResume
+  }
+
+  if (!jobDescription || jobDescription.length < 100) {
+    console.log('Job description too short, using base resume')
+    return baseResume
+  }
+
+  try {
+    const prompt = `You are an expert ATS (Applicant Tracking System) resume optimizer.
+
+Given the applicant's base resume and a job description, create a tailored version of the resume that:
+1. Incorporates relevant keywords from the job description naturally
+2. Highlights experiences that match what the job is looking for
+3. Reorders or emphasizes skills that are most relevant to this specific role
+4. Keeps all factual information accurate - do not fabricate experiences
+5. Maintains a professional tone
+
+JOB: ${jobRole} at ${company}
+
+JOB DESCRIPTION:
+${jobDescription.substring(0, 3000)}
+
+BASE RESUME:
+${baseResume.substring(0, 4000)}
+
+OUTPUT ONLY the optimized resume text. No explanations, no markdown formatting, just the resume content ready to paste into an application form.`
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openrouterKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://peebo.app',
+        'X-Title': 'Peebo Job Application'
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.0-flash-001',
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 2000,
+        temperature: 0.3
+      })
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error('OpenRouter error:', error)
+      return baseResume
+    }
+
+    const result = await response.json()
+    const tailoredResume = result.choices?.[0]?.message?.content?.trim()
+
+    if (tailoredResume && tailoredResume.length > 200) {
+      console.log(`Resume tailored for ${company} - ${jobRole}`)
+      return tailoredResume
+    }
+
+    return baseResume
+  } catch (error) {
+    console.error('Error tailoring resume:', error)
+    return baseResume
+  }
+}
+
 // Process the next queued job
 async function processNextJob(
   session: BatchSession,
@@ -572,7 +716,7 @@ async function processNextJob(
   // Start this job
   nextJob.status = 'running'
   nextJob.started_at = new Date().toISOString()
-  nextJob.current_step = 'Starting application...'
+  nextJob.current_step = 'Fetching job description...'
 
   try {
     const browserUseKey = Deno.env.get('PEEBO_BROWSER_USE_KEY')
@@ -580,8 +724,26 @@ async function processNextJob(
       throw new Error('Browser-use API key not configured')
     }
 
-    // Build application task
-    const task = buildApplicationTask(nextJob, user)
+    // Step 1: Fetch job description
+    console.log(`[${nextJob.company}] Fetching job description...`)
+    const jobDescription = await fetchJobDescription(nextJob.job_url, browserUseKey)
+    nextJob.job_description = jobDescription
+
+    // Step 2: Tailor resume for this specific job
+    nextJob.current_step = 'Tailoring resume for this role...'
+    console.log(`[${nextJob.company}] Tailoring resume...`)
+    const baseResume = user.resume_text || request?.resume_text || ''
+    const tailoredResume = await tailorResumeForJob(
+      baseResume,
+      jobDescription,
+      nextJob.role,
+      nextJob.company
+    )
+    nextJob.tailored_resume = tailoredResume
+
+    // Step 3: Build application task with tailored resume
+    nextJob.current_step = 'Starting application...'
+    const task = buildApplicationTask(nextJob, user, tailoredResume)
 
     // Start browser-use task
     const response = await fetch('https://api.browser-use.com/api/v1/run-task', {
@@ -619,7 +781,9 @@ async function processNextJob(
 }
 
 // Build application task for a specific job
-function buildApplicationTask(job: BatchJob, user: PeeboUser): string {
+function buildApplicationTask(job: BatchJob, user: PeeboUser, tailoredResume?: string): string {
+  const resumeToUse = tailoredResume || user.resume_text || ''
+
   return `
 Apply to the job at: ${job.job_url}
 
@@ -628,16 +792,18 @@ Applicant Information:
 - Email: ${user.email}
 - LinkedIn: ${user.linkedin_url || ''}
 
-${user.resume_text ? `Resume content:\n${user.resume_text.substring(0, 3000)}` : ''}
+TAILORED RESUME (optimized for this specific role):
+${resumeToUse.substring(0, 4000)}
 
 Instructions:
 1. Navigate to the job application page
 2. Click the apply button
 3. Fill in all required fields with the provided information
-4. Upload resume if there's a file upload option
-5. Answer screening questions based on the resume
-6. Submit the application
-7. Confirm submission was successful
+4. For resume field: If there's a text area or "enter manually" option, paste the TAILORED RESUME above
+5. If only file upload is available, note this in your response
+6. Answer screening questions based on the resume content
+7. Submit the application
+8. Confirm submission was successful
 
 Report your progress at each step.
 If there's a CAPTCHA or login required, report FAILURE with the reason.
