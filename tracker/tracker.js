@@ -12,6 +12,13 @@ let settings = null;
 let activeTaskPollInterval = null;
 let currentDetailJobId = null;
 
+// Side panel state
+let currentPanel = null; // 'activity' | 'job'
+let currentJob = null;
+let activeTab = 'details';
+let navigationStack = []; // For back button
+let hasUnreadActivity = false;
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -338,7 +345,7 @@ function createJobCard(job) {
     <div class="job-card"
          data-job-id="${job.id}"
          draggable="true"
-         onclick="openDetailModal('${job.id}')"
+         onclick="openJobPanel('${job.id}')"
          oncontextmenu="showCardContextMenu(event, '${job.id}')">
       <div class="job-card-action ${actionClass}">
         ${actionBanner}
@@ -522,6 +529,35 @@ function setupEventListeners() {
 
   // Update sync status display on load
   updateEmailSyncStatus();
+
+  // Activity button
+  document.getElementById('activity-btn').addEventListener('click', () => {
+    openSidePanel('activity');
+  });
+
+  // Panel close button
+  document.getElementById('panel-close').addEventListener('click', closeSidePanel);
+
+  // Panel back button
+  document.getElementById('panel-back').addEventListener('click', navigateBack);
+
+  // Panel backdrop click to close
+  document.getElementById('panel-backdrop').addEventListener('click', closeSidePanel);
+
+  // Panel tab clicks
+  document.querySelectorAll('.panel-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.dataset.tab;
+      switchPanelTab(tabName);
+    });
+  });
+
+  // Escape key to close panel
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && currentPanel) {
+      closeSidePanel();
+    }
+  });
 }
 
 // ============================================
@@ -817,18 +853,27 @@ async function handleAddJob(e) {
   
   trackerData.jobs.unshift(newJob);
   await storage.save(trackerData);
-  
+
+  // Log activity
+  await logActivity('new_application', newJob.id, newJob.company, newJob.role, {
+    source: 'manual'
+  }, newJob.status);
+
   closeAllModals();
   await refreshUI();
 }
 
 async function handleSaveDetail(e) {
   e.preventDefault();
-  
+
   const jobId = document.getElementById('detail-id').value;
   const job = trackerData.jobs.find(j => j.id === jobId);
   if (!job) return;
-  
+
+  // Track old values for activity logging
+  const oldStatus = job.status;
+  const oldNotes = job.notes || '';
+
   // Update job
   job.company = document.getElementById('detail-company').value.trim();
   job.role = document.getElementById('detail-role').value.trim();
@@ -875,13 +920,29 @@ async function handleSaveDetail(e) {
     job.offer = null;
   }
   
-  job.notes = document.getElementById('detail-notes').value.trim();
+  const newNotes = document.getElementById('detail-notes').value.trim();
+  job.notes = newNotes;
   job.companyResearch = document.getElementById('detail-company-research').value.trim() || null;
-  
+
   job.updated_at = new Date().toISOString();
-  
+
   await storage.save(trackerData);
-  
+
+  // Log activity for status change
+  if (oldStatus !== job.status) {
+    await logActivity('status_change', job.id, job.company, job.role, {
+      from: oldStatus,
+      to: job.status
+    }, job.status);
+  }
+
+  // Log activity for notes change (if significant)
+  if (newNotes !== oldNotes && Math.abs(newNotes.length - oldNotes.length) > 10) {
+    await logActivity('note_updated', job.id, job.company, job.role, {
+      preview: newNotes.substring(0, 50) + (newNotes.length > 50 ? '...' : '')
+    }, job.status);
+  }
+
   closeAllModals();
   await refreshUI();
 }
@@ -1073,18 +1134,25 @@ function showCardContextMenu(event, jobId) {
       job.updated_at = new Date().toISOString();
       job.notes = (job.notes || '') + `\n[${job.lastActivityDate}] Followed up`;
       await storage.save(trackerData);
+      // Log activity
+      await logActivity('field_updated', job.id, job.company, job.role, {
+        field: 'followed_up',
+        new_value: job.lastActivityDate
+      }, job.status);
       await refreshUI();
       menu.classList.add('hidden');
     };
     menu.appendChild(followUpBtn);
   }
-  
+
   // Delete
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'danger';
   deleteBtn.textContent = '🗑️ Delete';
   deleteBtn.onclick = async () => {
     if (confirm(`Delete application to ${job.company}?`)) {
+      // Log before deleting
+      await logActivity('deleted', job.id, job.company, job.role, {}, job.status);
       trackerData.jobs = trackerData.jobs.filter(j => j.id !== jobId);
       await storage.save(trackerData);
       await refreshUI();
@@ -1149,23 +1217,37 @@ async function handleDrop(e) {
   if (e.stopPropagation) {
     e.stopPropagation();
   }
-  
+
   const jobId = e.dataTransfer.getData('text/html');
   const newStatus = e.currentTarget.dataset.status;
-  
+
   const job = trackerData.jobs.find(j => j.id === jobId);
   if (!job) return false;
-  
+
+  const oldStatus = job.status;
+
+  // Skip if no change
+  if (oldStatus === newStatus) {
+    e.currentTarget.classList.remove('drag-over');
+    return false;
+  }
+
   job.status = newStatus;
   job.lastActivityDate = new Date().toISOString().split('T')[0];
   job.updated_at = new Date().toISOString();
-  
+
   // Clear interview_stage if moving out of interviewing
   if (newStatus !== 'interviewing') {
     job.interview_stage = null;
   }
-  
+
   await storage.save(trackerData);
+
+  // Log activity
+  await logActivity('status_change', job.id, job.company, job.role, {
+    from: oldStatus,
+    to: newStatus
+  }, newStatus);
   await refreshUI();
   
   return false;
@@ -1208,3 +1290,1617 @@ function formatDateShort(dateStr) {
 function showError(message) {
   alert(message);
 }
+
+// ============================================
+// ACTIVITY LOGGING
+// ============================================
+
+/**
+ * Log an activity event
+ * @param {string} type - Event type: new_application, status_change, email_received, note_updated, field_updated, deleted
+ * @param {string} appId - Application/job ID
+ * @param {string} company - Company name (denormalized for display)
+ * @param {string} role - Role name (denormalized for display)
+ * @param {Object} data - Event-specific data
+ * @param {string} [status] - Current status of the job (for coloring)
+ */
+async function logActivity(type, appId, company, role, data, status = 'applied') {
+  const activity = {
+    id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    type,
+    app_id: appId,
+    company,
+    role,
+    status,
+    data
+  };
+
+  // Load current activities
+  if (!trackerData.activities) {
+    trackerData.activities = [];
+  }
+
+  // Add to beginning (newest first)
+  trackerData.activities.unshift(activity);
+
+  // Keep only last 500 activities to prevent unbounded growth
+  if (trackerData.activities.length > 500) {
+    trackerData.activities = trackerData.activities.slice(0, 500);
+  }
+
+  // Mark as unread
+  hasUnreadActivity = true;
+  updateActivityButtonIndicator();
+
+  // Save
+  await storage.save(trackerData);
+
+  console.log('[Activity] Logged:', type, company, data);
+
+  return activity;
+}
+
+/**
+ * Get activities, optionally filtered by job ID
+ * @param {string} [appId] - Optional job ID to filter by
+ * @returns {Array} Activities sorted by timestamp (newest first)
+ */
+function getActivities(appId = null) {
+  const activities = trackerData.activities || [];
+
+  if (appId) {
+    return activities.filter(a => a.app_id === appId);
+  }
+
+  return activities;
+}
+
+/**
+ * Clear all activities
+ */
+async function clearAllActivities() {
+  trackerData.activities = [];
+  await storage.save(trackerData);
+  console.log('[Activity] Cleared all activities');
+}
+
+/**
+ * Group activities by date for display
+ * @param {Array} activities
+ * @returns {Object} Activities grouped by date label
+ */
+function groupActivitiesByDate(activities) {
+  const groups = {};
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const thisWeekStart = new Date(today);
+  thisWeekStart.setDate(thisWeekStart.getDate() - thisWeekStart.getDay());
+
+  activities.forEach(activity => {
+    const activityDate = new Date(activity.timestamp);
+    const activityDay = new Date(activityDate.getFullYear(), activityDate.getMonth(), activityDate.getDate());
+
+    let label;
+    if (activityDay.getTime() === today.getTime()) {
+      label = 'Today';
+    } else if (activityDay.getTime() === yesterday.getTime()) {
+      label = 'Yesterday';
+    } else if (activityDay >= thisWeekStart) {
+      label = 'This week';
+    } else {
+      label = activityDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    if (!groups[label]) {
+      groups[label] = [];
+    }
+    groups[label].push(activity);
+  });
+
+  return groups;
+}
+
+/**
+ * Format relative time
+ * @param {string} timestamp
+ * @returns {string}
+ */
+function formatRelativeTime(timestamp) {
+  const now = new Date();
+  const date = new Date(timestamp);
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m`;
+  if (diffHours < 24) return `${diffHours}h`;
+  if (diffDays < 7) return `${diffDays}d`;
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * Update the activity button indicator
+ */
+function updateActivityButtonIndicator() {
+  const btn = document.getElementById('activity-btn');
+  if (!btn) return;
+
+  const indicator = btn.querySelector('.activity-unread-dot');
+  if (hasUnreadActivity) {
+    if (!indicator) {
+      const dot = document.createElement('span');
+      dot.className = 'activity-unread-dot';
+      btn.appendChild(dot);
+    }
+  } else {
+    if (indicator) {
+      indicator.remove();
+    }
+  }
+}
+
+// ============================================
+// SIDE PANEL
+// ============================================
+
+/**
+ * Open the side panel
+ * @param {string} type - 'activity' or 'job'
+ * @param {Object} data - Job data (for job panel)
+ * @param {string} [tab] - Tab to open to (for job panel)
+ */
+function openSidePanel(type, data = null, tab = 'details') {
+  // If clicking same job card again, close panel (toggle behavior)
+  if (type === 'job' && currentPanel === 'job' && currentJob && data && currentJob.id === data.id) {
+    closeSidePanel();
+    return;
+  }
+
+  // Save navigation history if switching from one panel to another
+  if (currentPanel && (currentPanel !== type || (type === 'job' && currentJob?.id !== data?.id))) {
+    navigationStack.push({ type: currentPanel, data: currentJob, tab: activeTab });
+  }
+
+  currentPanel = type;
+  if (type === 'job') {
+    currentJob = data;
+    activeTab = tab;
+  } else {
+    currentJob = null;
+    activeTab = 'details';
+  }
+
+  renderPanel();
+
+  document.getElementById('panel-backdrop').classList.remove('hidden');
+  document.getElementById('side-panel').classList.remove('hidden');
+  document.getElementById('panel-back').classList.toggle('hidden', navigationStack.length === 0);
+
+  // Mark activity as read when opening activity panel
+  if (type === 'activity') {
+    hasUnreadActivity = false;
+    updateActivityButtonIndicator();
+  }
+}
+
+/**
+ * Close the side panel
+ */
+function closeSidePanel() {
+  document.getElementById('panel-backdrop').classList.add('hidden');
+  document.getElementById('side-panel').classList.add('hidden');
+  currentPanel = null;
+  currentJob = null;
+  navigationStack = [];
+}
+
+/**
+ * Navigate back in panel history
+ */
+function navigateBack() {
+  if (navigationStack.length === 0) {
+    closeSidePanel();
+    return;
+  }
+
+  const prev = navigationStack.pop();
+  currentPanel = prev.type;
+  currentJob = prev.data;
+  activeTab = prev.tab || 'details';
+
+  renderPanel();
+  document.getElementById('panel-back').classList.toggle('hidden', navigationStack.length === 0);
+}
+
+/**
+ * Render the current panel
+ */
+function renderPanel() {
+  if (currentPanel === 'activity') {
+    renderActivityPanel();
+  } else if (currentPanel === 'job') {
+    renderJobPanel(currentJob, activeTab);
+  }
+}
+
+/**
+ * Render the global activity panel
+ */
+function renderActivityPanel() {
+  const title = document.getElementById('panel-title');
+  const subtitle = document.getElementById('panel-subtitle');
+  const jobHeader = document.getElementById('panel-job-header');
+  const tabs = document.getElementById('panel-tabs');
+  const content = document.getElementById('panel-content');
+  const footer = document.getElementById('panel-footer');
+
+  // Setup header
+  title.textContent = 'Activity';
+  subtitle.textContent = 'Your job search timeline';
+
+  // Hide job-specific elements
+  jobHeader.classList.add('hidden');
+  tabs.classList.add('hidden');
+
+  // Get activities
+  const activities = getActivities();
+
+  if (activities.length === 0) {
+    content.innerHTML = `
+      <div class="panel-empty">
+        <div class="panel-empty-icon">📭</div>
+        <h3 class="panel-empty-title">No activity yet</h3>
+        <p class="panel-empty-text">Your job search events will appear here</p>
+      </div>
+    `;
+    footer.classList.add('hidden');
+    return;
+  }
+
+  // Group by date
+  const grouped = groupActivitiesByDate(activities);
+
+  let html = '';
+  for (const [label, items] of Object.entries(grouped)) {
+    html += `
+      <div class="activity-date-group">
+        <div class="activity-date-label">${escapeHtml(label)}</div>
+        ${items.map(activity => renderActivityItem(activity)).join('')}
+      </div>
+    `;
+  }
+
+  content.innerHTML = html;
+
+  // Show footer with clear button
+  footer.classList.remove('hidden');
+  footer.innerHTML = `
+    <button class="clear-activity-btn" onclick="handleClearAllActivity()">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
+      </svg>
+      Clear all activity
+    </button>
+  `;
+}
+
+/**
+ * Render a single activity item
+ */
+function renderActivityItem(activity) {
+  const { icon, label, badgeClass } = getActivityEventDisplay(activity);
+
+  return `
+    <div class="activity-item status-${activity.status || 'applied'}" onclick="handleActivityClick('${activity.app_id}', '${activity.type}')">
+      <div class="activity-item-header">
+        <span class="activity-company">${escapeHtml(activity.company)}</span>
+        <span class="activity-time">${formatRelativeTime(activity.timestamp)}</span>
+      </div>
+      <div class="activity-role">${escapeHtml(activity.role)}</div>
+      <div class="activity-event">
+        <span class="activity-event-badge ${badgeClass}">${icon} ${label}</span>
+      </div>
+      ${activity.data?.reason || activity.data?.preview ? `<div class="activity-detail">${escapeHtml(activity.data.reason || activity.data.preview || '')}</div>` : ''}
+    </div>
+  `;
+}
+
+/**
+ * Get display info for an activity event
+ */
+function getActivityEventDisplay(activity) {
+  const displays = {
+    new_application: { icon: '✚', label: 'Applied', badgeClass: '' },
+    status_change: { icon: '', label: '', badgeClass: '' },
+    email_received: { icon: '📧', label: 'Email received', badgeClass: '' },
+    note_updated: { icon: '📝', label: 'Note updated', badgeClass: '' },
+    field_updated: { icon: '✏️', label: 'Updated', badgeClass: '' },
+    deleted: { icon: '🗑️', label: 'Deleted', badgeClass: '' }
+  };
+
+  let display = displays[activity.type] || { icon: '•', label: activity.type, badgeClass: '' };
+
+  // Special handling for status changes
+  if (activity.type === 'status_change') {
+    const toStatus = activity.data?.to || 'unknown';
+    const statusDisplay = {
+      applied: { icon: '🔵', label: 'Applied', badgeClass: '' },
+      interviewing: { icon: '🟡', label: 'Interviewing', badgeClass: 'status-interviewing' },
+      rejected: { icon: '🔴', label: 'Rejected', badgeClass: 'status-rejected' },
+      offer: { icon: '🟢', label: 'Offer', badgeClass: 'status-offer' }
+    };
+    display = statusDisplay[toStatus] || { icon: '•', label: toStatus, badgeClass: '' };
+  }
+
+  return display;
+}
+
+/**
+ * Handle click on activity item
+ */
+function handleActivityClick(appId, eventType) {
+  const job = trackerData.jobs.find(j => j.id === appId);
+  if (!job) {
+    // Job was deleted
+    return;
+  }
+
+  // Smart tab routing based on event type
+  let tab = 'details';
+  if (eventType === 'note_updated') {
+    tab = 'notes';
+  } else if (eventType === 'status_change' || eventType === 'email_received' || eventType === 'field_updated') {
+    tab = 'details';
+  }
+
+  openSidePanel('job', job, tab);
+}
+
+/**
+ * Handle clear all activity
+ */
+async function handleClearAllActivity() {
+  if (!confirm('Clear all activity? This cannot be undone.')) {
+    return;
+  }
+
+  await clearAllActivities();
+  renderPanel();
+}
+
+/**
+ * Render the job details panel
+ */
+function renderJobPanel(job, tab = 'details') {
+  if (!job) return;
+
+  const title = document.getElementById('panel-title');
+  const subtitle = document.getElementById('panel-subtitle');
+  const jobHeader = document.getElementById('panel-job-header');
+  const tabs = document.getElementById('panel-tabs');
+  const content = document.getElementById('panel-content');
+  const footer = document.getElementById('panel-footer');
+
+  // Setup header (hide main title, show job header)
+  title.textContent = '';
+  subtitle.textContent = '';
+
+  // Show job header
+  jobHeader.classList.remove('hidden');
+  document.getElementById('panel-status-dot').className = `status-dot-large ${job.status}`;
+  document.getElementById('panel-company').textContent = job.company;
+  document.getElementById('panel-role').textContent = job.role;
+
+  // Format date
+  const daysSince = Math.floor((new Date() - new Date(job.dateApplied)) / (1000 * 60 * 60 * 24));
+  const dateText = daysSince === 0 ? 'Applied today' : daysSince === 1 ? 'Applied yesterday' : `Applied ${daysSince} days ago`;
+  document.getElementById('panel-date').textContent = dateText;
+
+  // Show tabs
+  tabs.classList.remove('hidden');
+
+  // Update active tab
+  document.querySelectorAll('.panel-tab').forEach(tabBtn => {
+    tabBtn.classList.toggle('active', tabBtn.dataset.tab === tab);
+  });
+
+  // Render tab content
+  if (tab === 'details') {
+    renderJobDetailsTab(job, content);
+    renderJobDetailsFooter(job, footer);
+  } else if (tab === 'activity') {
+    renderJobActivityTab(job, content);
+    footer.classList.add('hidden');
+  } else if (tab === 'notes') {
+    renderJobNotesTab(job, content);
+    footer.classList.add('hidden');
+  }
+
+  activeTab = tab;
+}
+
+/**
+ * Render the Details tab content
+ */
+function renderJobDetailsTab(job, content) {
+  const salaryText = formatSalaryRange(job.salaryMin, job.salaryMax);
+
+  content.innerHTML = `
+    <div class="detail-section">
+      <div class="detail-field">
+        <label class="detail-field-label">Status</label>
+        <select class="input" id="panel-status" onchange="handlePanelStatusChange('${job.id}', this.value)">
+          <option value="applied" ${job.status === 'applied' ? 'selected' : ''}>Applied</option>
+          <option value="interviewing" ${job.status === 'interviewing' ? 'selected' : ''}>Interviewing</option>
+          <option value="rejected" ${job.status === 'rejected' ? 'selected' : ''}>Rejected</option>
+          <option value="offer" ${job.status === 'offer' ? 'selected' : ''}>Offer</option>
+        </select>
+      </div>
+
+      ${job.jobUrl ? `
+      <div class="detail-field">
+        <label class="detail-field-label">Job posting</label>
+        <a href="${escapeHtml(job.jobUrl)}" target="_blank" class="detail-field-link">
+          <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(truncateUrl(job.jobUrl))}</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 10l8-8M14 6V2h-4M14 2L8 8"/>
+          </svg>
+        </a>
+      </div>
+      ` : ''}
+
+      <div class="detail-field">
+        <label class="detail-field-label">Salary range</label>
+        <input type="text" class="input" id="panel-salary" value="${salaryText}" placeholder="e.g., $150k - $180k" onblur="handlePanelSalaryChange('${job.id}', this.value)">
+      </div>
+    </div>
+
+    ${(job.confirmation_email_url || job.rejection_email_url) ? `
+    <div class="detail-divider"></div>
+    <div class="detail-section">
+      <div class="detail-section-title">📧 Related emails</div>
+      <div class="email-links">
+        ${job.confirmation_email_url ? `
+        <a href="${escapeHtml(job.confirmation_email_url)}" target="_blank" class="email-link">
+          <span>Confirmation email</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 10l8-8M14 6V2h-4M14 2L8 8"/>
+          </svg>
+        </a>
+        ` : ''}
+        ${job.rejection_email_url ? `
+        <a href="${escapeHtml(job.rejection_email_url)}" target="_blank" class="email-link">
+          <span>Rejection email</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 10l8-8M14 6V2h-4M14 2L8 8"/>
+          </svg>
+        </a>
+        ` : ''}
+      </div>
+    </div>
+    ` : ''}
+  `;
+}
+
+/**
+ * Render the Details tab footer
+ */
+function renderJobDetailsFooter(job, footer) {
+  footer.classList.remove('hidden');
+  footer.innerHTML = `
+    <button class="btn btn-secondary" onclick="handlePanelDelete('${job.id}')">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
+      </svg>
+      Delete
+    </button>
+    <button class="btn btn-primary" onclick="openDetailModal('${job.id}'); closeSidePanel();">
+      Edit all fields
+    </button>
+  `;
+}
+
+/**
+ * Render the Activity tab content (job-specific)
+ */
+function renderJobActivityTab(job, content) {
+  const activities = getActivities(job.id);
+
+  if (activities.length === 0) {
+    content.innerHTML = `
+      <div class="panel-empty">
+        <div class="panel-empty-icon">📋</div>
+        <h3 class="panel-empty-title">No activity</h3>
+        <p class="panel-empty-text">Events for this job will appear here</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = activities.map(activity => {
+    const { icon, label } = getActivityEventDisplay(activity);
+    return `
+      <div class="job-activity-item">
+        <div class="job-activity-event">${icon} ${label}</div>
+        ${activity.data?.reason || activity.data?.preview || activity.data?.from ? `
+          <div class="job-activity-detail">${escapeHtml(activity.data.reason || activity.data.preview || (activity.data.from ? `from ${activity.data.from}` : ''))}</div>
+        ` : ''}
+        <div class="job-activity-time">${formatRelativeTime(activity.timestamp)}</div>
+      </div>
+    `;
+  }).join('');
+
+  html += `<div class="activity-timeline-end">End of history</div>`;
+
+  content.innerHTML = html;
+}
+
+/**
+ * Render the Notes tab content
+ */
+function renderJobNotesTab(job, content) {
+  content.innerHTML = `
+    <textarea class="notes-textarea" id="panel-notes" placeholder="Add notes about this application..."
+      onblur="handlePanelNotesChange('${job.id}')"
+      oninput="debouncedNotesAutoSave('${job.id}')">${escapeHtml(job.notes || '')}</textarea>
+    <div class="notes-footer">
+      <span class="notes-saved" id="notes-saved-indicator">✓ Saved</span>
+      <span id="notes-char-count">${(job.notes || '').length} chars</span>
+    </div>
+  `;
+}
+
+// Debounced notes auto-save
+let notesAutoSaveTimeout = null;
+function debouncedNotesAutoSave(jobId) {
+  const textarea = document.getElementById('panel-notes');
+  const charCount = document.getElementById('notes-char-count');
+
+  if (charCount && textarea) {
+    charCount.textContent = `${textarea.value.length} chars`;
+  }
+
+  if (notesAutoSaveTimeout) {
+    clearTimeout(notesAutoSaveTimeout);
+  }
+
+  notesAutoSaveTimeout = setTimeout(() => {
+    handlePanelNotesChange(jobId, true);
+  }, 1000);
+}
+
+/**
+ * Handle status change in panel
+ */
+async function handlePanelStatusChange(jobId, newStatus) {
+  const job = trackerData.jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  const oldStatus = job.status;
+  if (oldStatus === newStatus) return;
+
+  job.status = newStatus;
+  job.lastActivityDate = new Date().toISOString().split('T')[0];
+  job.updated_at = new Date().toISOString();
+
+  // Clear interview_stage if moving out of interviewing
+  if (newStatus !== 'interviewing') {
+    job.interview_stage = null;
+  }
+
+  await storage.save(trackerData);
+
+  // Log activity
+  await logActivity('status_change', job.id, job.company, job.role, {
+    from: oldStatus,
+    to: newStatus
+  }, newStatus);
+
+  // Update panel header
+  document.getElementById('panel-status-dot').className = `status-dot-large ${newStatus}`;
+
+  // Refresh kanban
+  await refreshUI();
+}
+
+/**
+ * Handle salary change in panel
+ */
+async function handlePanelSalaryChange(jobId, salaryText) {
+  const job = trackerData.jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  // Parse salary text (e.g., "$150k - $180k" or "150000 - 180000")
+  const { min, max } = parseSalaryRange(salaryText);
+
+  if (job.salaryMin === min && job.salaryMax === max) return;
+
+  const oldSalary = formatSalaryRange(job.salaryMin, job.salaryMax);
+  job.salaryMin = min;
+  job.salaryMax = max;
+  job.updated_at = new Date().toISOString();
+
+  await storage.save(trackerData);
+
+  // Log activity
+  await logActivity('field_updated', job.id, job.company, job.role, {
+    field: 'salary',
+    old_value: oldSalary,
+    new_value: formatSalaryRange(min, max)
+  }, job.status);
+
+  await refreshUI();
+}
+
+/**
+ * Handle notes change in panel
+ */
+async function handlePanelNotesChange(jobId, isAutoSave = false) {
+  const job = trackerData.jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  const textarea = document.getElementById('panel-notes');
+  if (!textarea) return;
+
+  const newNotes = textarea.value;
+  if (job.notes === newNotes) return;
+
+  const oldNotes = job.notes || '';
+  job.notes = newNotes;
+  job.updated_at = new Date().toISOString();
+
+  await storage.save(trackerData);
+
+  // Show saved indicator
+  const savedIndicator = document.getElementById('notes-saved-indicator');
+  if (savedIndicator) {
+    savedIndicator.classList.add('visible');
+    setTimeout(() => savedIndicator.classList.remove('visible'), 2000);
+  }
+
+  // Only log activity if significantly changed and not auto-save
+  if (!isAutoSave && Math.abs(newNotes.length - oldNotes.length) > 10) {
+    await logActivity('note_updated', job.id, job.company, job.role, {
+      preview: newNotes.substring(0, 50) + (newNotes.length > 50 ? '...' : '')
+    }, job.status);
+  }
+}
+
+/**
+ * Handle delete from panel
+ */
+async function handlePanelDelete(jobId) {
+  const job = trackerData.jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  if (!confirm(`Delete application to ${job.company}?`)) return;
+
+  // Log before deleting
+  await logActivity('deleted', job.id, job.company, job.role, {}, job.status);
+
+  trackerData.jobs = trackerData.jobs.filter(j => j.id !== jobId);
+  await storage.save(trackerData);
+
+  closeSidePanel();
+  await refreshUI();
+}
+
+/**
+ * Switch tab in job panel
+ */
+function switchPanelTab(tab) {
+  if (!currentJob) return;
+  activeTab = tab;
+  renderJobPanel(currentJob, tab);
+}
+
+// ============================================
+// UTILITY FUNCTIONS (Panel)
+// ============================================
+
+function truncateUrl(url) {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.length > 30 ? u.pathname.substring(0, 30) + '...' : u.pathname;
+    return u.hostname + path;
+  } catch {
+    return url.substring(0, 50) + '...';
+  }
+}
+
+function formatSalaryRange(min, max) {
+  if (!min && !max) return '';
+  if (min && max) {
+    return `$${Math.round(min/1000)}k - $${Math.round(max/1000)}k`;
+  } else if (min) {
+    return `$${Math.round(min/1000)}k+`;
+  } else {
+    return `Up to $${Math.round(max/1000)}k`;
+  }
+}
+
+function parseSalaryRange(text) {
+  if (!text || !text.trim()) return { min: null, max: null };
+
+  // Remove $ and k, convert to numbers
+  const cleaned = text.replace(/[$,k]/gi, '').trim();
+  const parts = cleaned.split(/[-–—]/);
+
+  const parseNum = (s) => {
+    const n = parseInt(s.trim(), 10);
+    if (isNaN(n)) return null;
+    // If less than 1000, assume it's in thousands
+    return n < 1000 ? n * 1000 : n;
+  };
+
+  if (parts.length >= 2) {
+    return {
+      min: parseNum(parts[0]),
+      max: parseNum(parts[1])
+    };
+  } else if (parts.length === 1) {
+    const num = parseNum(parts[0]);
+    // If single number, put in both
+    return { min: num, max: num };
+  }
+
+  return { min: null, max: null };
+}
+
+/**
+ * Open job panel from card click
+ */
+function openJobPanel(jobId) {
+  const job = trackerData.jobs.find(j => j.id === jobId);
+  if (!job) return;
+  openSidePanel('job', job, 'details');
+}
+
+// ============================================
+// BATCH APPLY PANEL
+// ============================================
+
+// Batch panel state
+let batchPanelState = 'closed'; // 'closed' | 'setup' | 'scraping' | 'active' | 'complete' | 'stopped'
+let batchSession = null;
+let batchPollInterval = null;
+let batchConfig = {
+  targetCount: 5,
+  criteria: {},
+  resumeName: 'resume_optimized.txt'
+};
+
+/**
+ * Initialize batch panel
+ */
+function initBatchPanel() {
+  // Batch apply button opens panel
+  const batchBtn = document.getElementById('batch-apply-btn');
+  if (batchBtn) {
+    batchBtn.removeEventListener('click', openBatchApplyModal);
+    batchBtn.addEventListener('click', openBatchPanel);
+  }
+
+  // Header bar click to resume
+  const headerBar = document.getElementById('batch-header-bar');
+  if (headerBar) {
+    headerBar.addEventListener('click', () => {
+      openBatchPanel('active');
+    });
+  }
+
+  // Check for existing session on load
+  if (trackerData.settings?.batch_session) {
+    batchSession = trackerData.settings.batch_session;
+    if (batchSession.status === 'active' || batchSession.status === 'scraping') {
+      // Show header bar if panel is closed
+      updateBatchHeaderBar();
+      startBatchPolling();
+    }
+  }
+}
+
+/**
+ * Open the batch panel
+ */
+function openBatchPanel(state = 'setup') {
+  batchPanelState = state;
+
+  // Hide main panel content
+  document.getElementById('panel-content').classList.add('hidden');
+  document.getElementById('panel-job-header').classList.add('hidden');
+  document.getElementById('panel-tabs').classList.add('hidden');
+  document.getElementById('panel-footer').classList.add('hidden');
+
+  // Show batch panel content
+  document.getElementById('batch-panel-content').classList.remove('hidden');
+
+  // Set panel header
+  const title = document.getElementById('panel-title');
+  const subtitle = document.getElementById('panel-subtitle');
+  title.textContent = 'Apply to jobs';
+  subtitle.textContent = '';
+
+  // Hide back button for batch
+  document.getElementById('panel-back').classList.add('hidden');
+
+  // Show panel
+  document.getElementById('panel-backdrop').classList.remove('hidden');
+  document.getElementById('side-panel').classList.remove('hidden');
+
+  // Hide header bar when panel is open
+  document.getElementById('batch-header-bar').classList.add('hidden');
+
+  // Render current state
+  renderBatchPanel();
+
+  // Clear navigation stack
+  navigationStack = [];
+  currentPanel = 'batch';
+}
+
+/**
+ * Close batch panel
+ */
+function closeBatchPanel() {
+  // Close the side panel
+  closeSidePanel();
+
+  // Reset to show main content
+  document.getElementById('panel-content').classList.remove('hidden');
+  document.getElementById('batch-panel-content').classList.add('hidden');
+
+  // If batch is active, show header bar
+  if (batchSession && (batchSession.status === 'active' || batchSession.status === 'scraping')) {
+    updateBatchHeaderBar();
+    document.getElementById('batch-header-bar').classList.remove('hidden');
+  }
+
+  currentPanel = null;
+}
+
+/**
+ * Render the batch panel based on current state
+ */
+function renderBatchPanel() {
+  const container = document.getElementById('batch-panel-content');
+
+  // Determine state from session
+  if (batchSession) {
+    batchPanelState = batchSession.status;
+  }
+
+  switch (batchPanelState) {
+    case 'setup':
+      renderBatchSetup(container);
+      break;
+    case 'scraping':
+      renderBatchScraping(container);
+      break;
+    case 'active':
+      renderBatchActive(container);
+      break;
+    case 'complete':
+    case 'stopped':
+      renderBatchComplete(container);
+      break;
+    default:
+      renderBatchSetup(container);
+  }
+}
+
+/**
+ * Render SETUP state
+ */
+function renderBatchSetup(container) {
+  // Load criteria from settings or applicant config
+  const criteria = trackerData.settings?.applicant || {};
+
+  container.innerHTML = `
+    <div class="batch-setup">
+      <div class="batch-section">
+        <div class="batch-section-header">
+          <span class="batch-section-icon">🔍</span>
+          <span class="batch-section-title">Job discovery</span>
+        </div>
+        <div class="batch-info-card">
+          <p style="color: var(--text-secondary); font-size: var(--text-sm); margin: 0;">
+            Peebo will search for jobs matching your criteria on LinkedIn, Indeed, and company career pages.
+          </p>
+        </div>
+      </div>
+
+      <div class="batch-section">
+        <div class="batch-section-header">
+          <span class="batch-section-icon">📋</span>
+          <span class="batch-section-title">Your criteria</span>
+        </div>
+        <div class="batch-info-card">
+          <div class="batch-info-row">
+            <span class="batch-info-label">Roles</span>
+            <span class="batch-info-value">${(criteria.target_roles || ['Product Manager']).join(', ')}</span>
+          </div>
+          <div class="batch-info-row">
+            <span class="batch-info-label">Location</span>
+            <span class="batch-info-value">${criteria.location_preference || 'Remote'}</span>
+          </div>
+          <div class="batch-info-row">
+            <span class="batch-info-label">Salary</span>
+            <span class="batch-info-value">$${Math.round((criteria.salary_minimum || 150000) / 1000)}k+</span>
+          </div>
+          <div class="batch-info-row">
+            <span class="batch-info-label">Industries</span>
+            <span class="batch-info-value">${(criteria.industries || ['Tech']).join(', ')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="batch-section">
+        <div class="batch-section-header">
+          <span class="batch-section-icon">📄</span>
+          <span class="batch-section-title">Resume</span>
+        </div>
+        <div class="batch-info-card">
+          <div class="batch-info-row">
+            <span class="batch-info-value">${batchConfig.resumeName}</span>
+            <span class="batch-info-label">Last updated: Today</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="batch-section">
+        <div class="batch-section-header">
+          <span class="batch-section-icon">🎯</span>
+          <span class="batch-section-title">Number of applications</span>
+        </div>
+        <div class="batch-count-selector">
+          <input type="number" class="batch-count-input" id="batch-count-input"
+            min="1" max="20" value="${batchConfig.targetCount}">
+          <span class="batch-estimate" id="batch-estimate">
+            ~${estimateBatchTime(batchConfig.targetCount)} minutes total
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="batch-setup-footer">
+      <button class="batch-start-btn" id="batch-start-btn">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 3l10 6-10 6V3z"/>
+        </svg>
+        Start applying
+      </button>
+    </div>
+  `;
+
+  // Add event listeners
+  document.getElementById('batch-count-input').addEventListener('input', (e) => {
+    let value = parseInt(e.target.value) || 5;
+    value = Math.max(1, Math.min(20, value));
+    batchConfig.targetCount = value;
+    document.getElementById('batch-estimate').textContent =
+      `~${estimateBatchTime(value)} minutes total`;
+  });
+
+  document.getElementById('batch-start-btn').addEventListener('click', startBatch);
+}
+
+/**
+ * Render SCRAPING state
+ */
+function renderBatchScraping(container) {
+  container.innerHTML = `
+    <div class="batch-scraping">
+      <img src="/assets/mascot/peebo-idle.svg" alt="Peebo" class="batch-scraping-mascot">
+      <h3 class="batch-scraping-title">Finding jobs for you...</h3>
+      <p class="batch-scraping-subtitle">Searching LinkedIn, Indeed, and career pages</p>
+      <div class="batch-scraping-dots">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Render ACTIVE state
+ */
+function renderBatchActive(container) {
+  if (!batchSession) {
+    renderBatchSetup(container);
+    return;
+  }
+
+  const jobs = batchSession.jobs || [];
+  const summary = {
+    total: jobs.length,
+    completed: jobs.filter(j => j.status === 'success').length,
+    failed: jobs.filter(j => j.status === 'failed').length,
+    running: jobs.filter(j => j.status === 'running').length,
+    queued: jobs.filter(j => j.status === 'queued').length
+  };
+
+  const progress = summary.total > 0
+    ? Math.round(((summary.completed + summary.failed) / summary.total) * 100)
+    : 0;
+
+  const remaining = summary.queued + summary.running;
+  const timeLeft = estimateBatchTime(remaining);
+
+  container.innerHTML = `
+    <div class="batch-active">
+      <div class="batch-job-list">
+        ${jobs.map(job => renderBatchJobCard(job)).join('')}
+      </div>
+
+      <div class="batch-progress-footer">
+        <div class="batch-progress-bar-container">
+          <div class="batch-progress-bar">
+            <div class="batch-progress-fill" style="width: ${progress}%"></div>
+          </div>
+          <span class="batch-progress-stats">${progress}% • ~${timeLeft} min left</span>
+        </div>
+
+        <div class="batch-summary-row">
+          <span>✓ ${summary.completed} applied${summary.failed > 0 ? ` • ✗ ${summary.failed} failed` : ''}</span>
+          <span class="batch-cost">$${(batchSession.total_cost || 0).toFixed(2)}</span>
+        </div>
+
+        <button class="batch-stop-all-btn" id="batch-stop-all-btn">
+          Stop all
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add event listeners
+  document.getElementById('batch-stop-all-btn')?.addEventListener('click', stopAllJobs);
+
+  // Add job action listeners
+  jobs.forEach(job => {
+    const viewBtn = document.getElementById(`batch-view-${job.id}`);
+    const stopBtn = document.getElementById(`batch-stop-${job.id}`);
+    const retryBtn = document.getElementById(`batch-retry-${job.id}`);
+
+    if (viewBtn && job.live_url) {
+      viewBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.open(job.live_url, '_blank');
+      });
+    }
+
+    if (stopBtn) {
+      stopBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        stopBatchJob(job.id);
+      });
+    }
+
+    if (retryBtn) {
+      retryBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        retryBatchJob(job.id);
+      });
+    }
+  });
+}
+
+/**
+ * Render a single batch job card
+ */
+function renderBatchJobCard(job) {
+  let statusIcon = '';
+  let statusClass = job.status;
+
+  switch (job.status) {
+    case 'running':
+      statusIcon = '<span class="batch-job-status-icon spinner"></span>';
+      break;
+    case 'success':
+      statusIcon = job.email_verified ? '✓✓' : '✓';
+      if (job.email_verified) statusClass += ' verified';
+      break;
+    case 'failed':
+      statusIcon = '✗';
+      break;
+    case 'stopped':
+      statusIcon = '⏹';
+      break;
+    case 'queued':
+    default:
+      statusIcon = '○';
+  }
+
+  const actions = [];
+  if (job.status === 'running' && job.live_url) {
+    actions.push(`<button class="batch-job-btn" id="batch-view-${job.id}">View</button>`);
+  }
+  if (job.status === 'running' || job.status === 'queued') {
+    actions.push(`<button class="batch-job-btn danger" id="batch-stop-${job.id}">Stop</button>`);
+  }
+  if (job.status === 'failed') {
+    actions.push(`<button class="batch-job-btn" id="batch-retry-${job.id}">Retry</button>`);
+  }
+
+  return `
+    <div class="batch-job-card ${statusClass}">
+      <div class="batch-job-header">
+        <div class="batch-job-info">
+          <h4 class="batch-job-company">
+            ${statusIcon}
+            ${escapeHtml(job.company)}
+          </h4>
+          <p class="batch-job-role">${escapeHtml(job.role)}</p>
+          ${job.status === 'running' && job.current_step ? `
+            <p class="batch-job-step">${escapeHtml(job.current_step)}</p>
+          ` : ''}
+        </div>
+        ${actions.length > 0 ? `
+          <div class="batch-job-actions">
+            ${actions.join('')}
+          </div>
+        ` : ''}
+      </div>
+      ${job.status === 'failed' && job.error_message ? `
+        <div class="batch-job-error">${escapeHtml(job.error_message)}</div>
+      ` : ''}
+    </div>
+  `;
+}
+
+/**
+ * Render COMPLETE state
+ */
+function renderBatchComplete(container) {
+  if (!batchSession) {
+    renderBatchSetup(container);
+    return;
+  }
+
+  const jobs = batchSession.jobs || [];
+  const completed = jobs.filter(j => j.status === 'success').length;
+  const failed = jobs.filter(j => j.status === 'failed').length;
+  const cost = (batchSession.total_cost || 0).toFixed(2);
+
+  const isStopped = batchSession.status === 'stopped';
+  const title = isStopped ? 'Batch stopped' : 'All done!';
+  const subtitle = isStopped
+    ? `Applied to ${completed} job${completed !== 1 ? 's' : ''} before stopping`
+    : `Applied to ${completed} job${completed !== 1 ? 's' : ''} successfully`;
+
+  container.innerHTML = `
+    <div class="batch-complete">
+      <img src="/assets/mascot/peebo-idle.svg" alt="Peebo" class="batch-complete-mascot">
+      <h2 class="batch-complete-title">${title}</h2>
+      <p class="batch-complete-subtitle">${subtitle}</p>
+
+      <div class="batch-complete-stats">
+        <div class="batch-stat">
+          <div class="batch-stat-value success">${completed}</div>
+          <div class="batch-stat-label">Applied</div>
+        </div>
+        <div class="batch-stat">
+          <div class="batch-stat-value failed">${failed}</div>
+          <div class="batch-stat-label">Failed</div>
+        </div>
+        <div class="batch-stat">
+          <div class="batch-stat-value cost">$${cost}</div>
+          <div class="batch-stat-label">Cost</div>
+        </div>
+      </div>
+
+      <div class="batch-complete-actions">
+        <button class="batch-view-jobs-btn" id="batch-view-jobs-btn">
+          View in tracker
+        </button>
+        <button class="batch-new-batch-btn" id="batch-new-batch-btn">
+          Apply to more jobs
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add event listeners
+  document.getElementById('batch-view-jobs-btn')?.addEventListener('click', () => {
+    closeBatchPanel();
+    // Jobs are already in the tracker
+  });
+
+  document.getElementById('batch-new-batch-btn')?.addEventListener('click', () => {
+    batchSession = null;
+    trackerData.settings.batch_session = null;
+    storage.save(trackerData);
+    batchPanelState = 'setup';
+    renderBatchPanel();
+  });
+}
+
+/**
+ * Start a batch session
+ */
+async function startBatch() {
+  const btn = document.getElementById('batch-start-btn');
+  btn.disabled = true;
+  btn.innerHTML = `
+    <span class="batch-job-status-icon spinner"></span>
+    Starting...
+  `;
+
+  try {
+    const criteria = trackerData.settings?.applicant || {};
+
+    // For now, create a mock session (real implementation would call the Edge Function)
+    const sessionId = generateUUID();
+    batchSession = {
+      id: sessionId,
+      status: 'scraping',
+      created_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      completed_at: null,
+      config: {
+        target_count: batchConfig.targetCount,
+        criteria_summary: formatBatchCriteria(criteria),
+        resume_name: batchConfig.resumeName
+      },
+      jobs: [],
+      total_cost: 0,
+      completed_count: 0,
+      failed_count: 0
+    };
+
+    // Save session to storage
+    trackerData.settings.batch_session = batchSession;
+    await storage.save(trackerData);
+
+    // Update UI to scraping state
+    batchPanelState = 'scraping';
+    renderBatchPanel();
+
+    // Start polling for status
+    startBatchPolling();
+
+    // Simulate job discovery (in real implementation, Edge Function handles this)
+    setTimeout(() => {
+      simulateJobDiscovery();
+    }, 3000);
+
+  } catch (error) {
+    console.error('[Batch] Start error:', error);
+    showError('Failed to start batch. Please try again.');
+    btn.disabled = false;
+    btn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 3l10 6-10 6V3z"/>
+      </svg>
+      Start applying
+    `;
+  }
+}
+
+/**
+ * Simulate job discovery (for demo/testing)
+ */
+function simulateJobDiscovery() {
+  if (!batchSession) return;
+
+  const mockJobs = [
+    { company: 'Stripe', role: 'Senior Product Manager' },
+    { company: 'Notion', role: 'Product Manager, Growth' },
+    { company: 'Linear', role: 'Staff Product Manager' },
+    { company: 'Figma', role: 'Product Manager' },
+    { company: 'Vercel', role: 'Senior PM, Platform' }
+  ];
+
+  batchSession.jobs = mockJobs.slice(0, batchConfig.targetCount).map((job, i) => ({
+    id: generateUUID(),
+    position: i + 1,
+    company: job.company,
+    role: job.role,
+    job_url: `https://jobs.lever.co/${job.company.toLowerCase()}`,
+    status: i === 0 ? 'running' : 'queued',
+    browser_use_task_id: null,
+    live_url: null,
+    started_at: i === 0 ? new Date().toISOString() : null,
+    completed_at: null,
+    current_step: i === 0 ? 'Navigating to application...' : null,
+    agent_success: null,
+    email_verified: false,
+    error_message: null,
+    cost: 0,
+    tracker_job_id: null
+  }));
+
+  batchSession.status = 'active';
+  trackerData.settings.batch_session = batchSession;
+  storage.save(trackerData);
+
+  batchPanelState = 'active';
+  renderBatchPanel();
+
+  // Simulate job progress
+  simulateJobProgress();
+}
+
+/**
+ * Simulate job progress (for demo/testing)
+ */
+function simulateJobProgress() {
+  if (!batchSession) return;
+
+  const steps = [
+    'Navigating to application...',
+    'Filling out form fields...',
+    'Uploading resume...',
+    'Answering screening questions...',
+    'Submitting application...'
+  ];
+
+  let stepIndex = 0;
+  let currentJobIndex = 0;
+
+  const progressInterval = setInterval(() => {
+    if (!batchSession || batchSession.status !== 'active') {
+      clearInterval(progressInterval);
+      return;
+    }
+
+    const runningJob = batchSession.jobs.find(j => j.status === 'running');
+    if (!runningJob) {
+      // Check if all done
+      const allDone = batchSession.jobs.every(j =>
+        j.status === 'success' || j.status === 'failed' || j.status === 'stopped'
+      );
+
+      if (allDone) {
+        batchSession.status = 'complete';
+        batchSession.completed_at = new Date().toISOString();
+        batchSession.completed_count = batchSession.jobs.filter(j => j.status === 'success').length;
+        batchSession.failed_count = batchSession.jobs.filter(j => j.status === 'failed').length;
+        trackerData.settings.batch_session = batchSession;
+        storage.save(trackerData);
+
+        batchPanelState = 'complete';
+        renderBatchPanel();
+        updateBatchHeaderBar();
+        clearInterval(progressInterval);
+        stopBatchPolling();
+        return;
+      }
+
+      // Start next job
+      const nextJob = batchSession.jobs.find(j => j.status === 'queued');
+      if (nextJob) {
+        nextJob.status = 'running';
+        nextJob.started_at = new Date().toISOString();
+        nextJob.current_step = steps[0];
+        stepIndex = 0;
+      }
+    } else {
+      // Progress current job
+      stepIndex++;
+
+      if (stepIndex >= steps.length) {
+        // Complete this job
+        const isSuccess = Math.random() > 0.15; // 85% success rate for demo
+        runningJob.status = isSuccess ? 'success' : 'failed';
+        runningJob.agent_success = isSuccess;
+        runningJob.completed_at = new Date().toISOString();
+        runningJob.cost = 0.05 + Math.random() * 0.1;
+        runningJob.current_step = null;
+
+        if (!isSuccess) {
+          runningJob.error_message = 'CAPTCHA detected, unable to proceed';
+        }
+
+        // Randomly set email verified
+        if (isSuccess && Math.random() > 0.5) {
+          setTimeout(() => {
+            runningJob.email_verified = true;
+            trackerData.settings.batch_session = batchSession;
+            storage.save(trackerData);
+            if (currentPanel === 'batch') {
+              renderBatchPanel();
+            }
+          }, 5000);
+        }
+
+        // Update total cost
+        batchSession.total_cost = batchSession.jobs.reduce((sum, j) => sum + (j.cost || 0), 0);
+
+        stepIndex = 0;
+      } else {
+        runningJob.current_step = steps[stepIndex];
+      }
+    }
+
+    trackerData.settings.batch_session = batchSession;
+    storage.save(trackerData);
+
+    if (currentPanel === 'batch') {
+      renderBatchPanel();
+    }
+    updateBatchHeaderBar();
+
+  }, 2000);
+}
+
+/**
+ * Stop all batch jobs
+ */
+async function stopAllJobs() {
+  if (!batchSession) return;
+
+  if (!confirm('Stop all remaining applications?')) return;
+
+  batchSession.jobs.forEach(job => {
+    if (job.status === 'queued' || job.status === 'running') {
+      job.status = 'stopped';
+    }
+  });
+
+  batchSession.status = 'stopped';
+  batchSession.completed_at = new Date().toISOString();
+  batchSession.completed_count = batchSession.jobs.filter(j => j.status === 'success').length;
+  batchSession.failed_count = batchSession.jobs.filter(j => j.status === 'failed').length;
+
+  trackerData.settings.batch_session = batchSession;
+  await storage.save(trackerData);
+
+  stopBatchPolling();
+  updateBatchHeaderBar();
+
+  batchPanelState = 'stopped';
+  renderBatchPanel();
+}
+
+/**
+ * Stop a specific batch job
+ */
+async function stopBatchJob(jobId) {
+  if (!batchSession) return;
+
+  const job = batchSession.jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  if (job.status === 'queued' || job.status === 'running') {
+    job.status = 'stopped';
+    trackerData.settings.batch_session = batchSession;
+    await storage.save(trackerData);
+    renderBatchPanel();
+  }
+}
+
+/**
+ * Retry a failed batch job
+ */
+async function retryBatchJob(jobId) {
+  if (!batchSession) return;
+
+  const job = batchSession.jobs.find(j => j.id === jobId);
+  if (!job || job.status !== 'failed') return;
+
+  job.status = 'queued';
+  job.error_message = null;
+  job.started_at = null;
+  job.completed_at = null;
+
+  // If batch was complete/stopped, reactivate
+  if (batchSession.status === 'complete' || batchSession.status === 'stopped') {
+    batchSession.status = 'active';
+    startBatchPolling();
+  }
+
+  trackerData.settings.batch_session = batchSession;
+  await storage.save(trackerData);
+
+  batchPanelState = 'active';
+  renderBatchPanel();
+
+  // Restart simulation
+  simulateJobProgress();
+}
+
+/**
+ * Start polling for batch status
+ */
+function startBatchPolling() {
+  if (batchPollInterval) return;
+
+  batchPollInterval = setInterval(() => {
+    // In real implementation, this would call the Edge Function
+    // For now, just update the header bar
+    updateBatchHeaderBar();
+  }, 5000);
+
+  console.log('[Batch] Polling started');
+}
+
+/**
+ * Stop polling for batch status
+ */
+function stopBatchPolling() {
+  if (batchPollInterval) {
+    clearInterval(batchPollInterval);
+    batchPollInterval = null;
+    console.log('[Batch] Polling stopped');
+  }
+}
+
+/**
+ * Update the batch header bar
+ */
+function updateBatchHeaderBar() {
+  const headerBar = document.getElementById('batch-header-bar');
+  if (!headerBar) return;
+
+  if (!batchSession || (batchSession.status !== 'active' && batchSession.status !== 'scraping')) {
+    headerBar.classList.add('hidden');
+    return;
+  }
+
+  // Don't show if panel is open
+  if (currentPanel === 'batch') {
+    headerBar.classList.add('hidden');
+    return;
+  }
+
+  const jobs = batchSession.jobs || [];
+  const completed = jobs.filter(j => j.status === 'success' || j.status === 'failed').length;
+  const total = jobs.length;
+  const remaining = jobs.filter(j => j.status === 'queued' || j.status === 'running').length;
+  const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  document.getElementById('batch-header-text').textContent = `Applying: ${completed}/${total}`;
+  document.getElementById('batch-header-fill').style.width = `${progress}%`;
+  document.getElementById('batch-header-time').textContent = `~${estimateBatchTime(remaining)} min left`;
+
+  headerBar.classList.remove('hidden');
+}
+
+/**
+ * Format batch criteria for display
+ */
+function formatBatchCriteria(criteria) {
+  const parts = [];
+  if (criteria.target_roles?.length) {
+    parts.push(`Roles: ${criteria.target_roles.join(', ')}`);
+  }
+  if (criteria.location_preference) {
+    parts.push(`Location: ${criteria.location_preference}`);
+  }
+  if (criteria.salary_minimum) {
+    parts.push(`Salary: $${Math.round(criteria.salary_minimum / 1000)}k+`);
+  }
+  return parts.join(' • ');
+}
+
+/**
+ * Estimate batch time in minutes
+ */
+function estimateBatchTime(jobCount) {
+  // ~2-5 minutes per job
+  const minPerJob = 3;
+  return Math.round(jobCount * minPerJob);
+}
+
+// Override panel close to handle batch panel
+const originalCloseSidePanel = closeSidePanel;
+closeSidePanel = function() {
+  if (currentPanel === 'batch') {
+    closeBatchPanel();
+  } else {
+    originalCloseSidePanel();
+  }
+};
+
+// Initialize batch panel when ready
+setTimeout(() => {
+  initBatchPanel();
+}, 100);

@@ -51,6 +51,12 @@
             </svg>
           </button>
         </div>
+        <button class="btn btn-icon btn-ghost" id="activity-btn" title="Activity">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 2v6l4 2"/>
+            <circle cx="10" cy="10" r="8"/>
+          </svg>
+        </button>
         <button class="btn btn-icon btn-ghost" id="settings-btn" title="Settings">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="10" cy="10" r="3"/>
@@ -80,6 +86,24 @@
       <div class="active-jobs" id="active-jobs">
         <!-- Active job cards inserted here -->
       </div>
+    </div>
+
+    <!-- Batch Header Progress Bar (shown when batch active but panel minimized) -->
+    <div class="batch-header-bar hidden" id="batch-header-bar">
+      <div class="batch-header-status">
+        <div class="batch-header-spinner"></div>
+        <span id="batch-header-text">Applying: 0/0</span>
+      </div>
+      <div class="batch-header-progress">
+        <div class="batch-header-progress-fill" id="batch-header-fill" style="width: 0%"></div>
+      </div>
+      <span class="batch-header-time" id="batch-header-time">~0 min left</span>
+      <button class="batch-header-resume" id="batch-header-resume">
+        Resume
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 2l6 4-6 4V2z"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Stats Bar -->
@@ -594,6 +618,62 @@
     <div class="context-menu hidden" id="context-menu">
       <!-- Menu items inserted dynamically -->
     </div>
+
+    <!-- Side Panel Backdrop -->
+    <div class="side-panel-backdrop hidden" id="panel-backdrop"></div>
+
+    <!-- Side Panel -->
+    <aside class="side-panel hidden" id="side-panel">
+      <header class="panel-header">
+        <button class="btn btn-icon btn-ghost panel-back hidden" id="panel-back" title="Back">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 4l-6 6 6 6"/>
+          </svg>
+        </button>
+        <div class="panel-title-area">
+          <h2 class="panel-title" id="panel-title">Activity</h2>
+          <p class="panel-subtitle" id="panel-subtitle"></p>
+        </div>
+        <button class="btn btn-icon btn-ghost" id="panel-close" title="Close">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 5l10 10M15 5l-10 10"/>
+          </svg>
+        </button>
+      </header>
+
+      <!-- Job Header (shown for job panel only) -->
+      <div class="panel-job-header hidden" id="panel-job-header">
+        <div class="job-header-status">
+          <span class="status-dot-large" id="panel-status-dot"></span>
+          <div class="job-header-info">
+            <h3 id="panel-company"></h3>
+            <p id="panel-role"></p>
+            <span class="job-header-date" id="panel-date"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab bar (job panel only) -->
+      <nav class="panel-tabs hidden" id="panel-tabs">
+        <button class="panel-tab active" data-tab="details">Details</button>
+        <button class="panel-tab" data-tab="activity">Activity</button>
+        <button class="panel-tab" data-tab="notes">Notes</button>
+        <div class="tab-indicator"></div>
+      </nav>
+
+      <div class="panel-content" id="panel-content">
+        <!-- Dynamic content rendered here -->
+      </div>
+
+      <!-- Batch Panel Content (separate from main panel-content) -->
+      <div class="batch-panel-content hidden" id="batch-panel-content">
+        <!-- Batch states rendered here by JS -->
+      </div>
+
+      <footer class="panel-footer hidden" id="panel-footer">
+        <!-- Dynamic footer actions -->
+      </footer>
+    </aside>
 
   </div>
 
