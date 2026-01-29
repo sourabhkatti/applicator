@@ -185,10 +185,11 @@ async function handleStartBatch(
   }
 
   // Check user has enough applications remaining
+  // Note: -1 means unlimited (premium users)
   const { data: remaining } = await supabase
     .rpc('peebo_remaining_apps', { p_user_id: user.id })
 
-  if (remaining !== null && remaining < body.target_count) {
+  if (remaining !== null && remaining !== -1 && remaining < body.target_count) {
     return jsonResponse({
       error: `You only have ${remaining} applications remaining this month`,
       remaining
