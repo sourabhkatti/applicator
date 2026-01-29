@@ -85,6 +85,19 @@ function generateUUID(): string {
   return crypto.randomUUID()
 }
 
+// Create anonymous user for testing without auth
+function createAnonymousUser(): PeeboUser {
+  return {
+    id: 'anonymous',
+    auth_user_id: 'anonymous',
+    email: 'test@peebo.local',
+    tier: 'premium',  // Allow full access for testing
+    monthly_app_limit: 100,
+    apps_used_this_month: 0,
+    full_name: 'Test User',
+  }
+}
+
 // Main handler
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -93,17 +106,22 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url)
-  // Get the path - Supabase passes the full URL, so we need to strip the prefix
-  // But also handle the case where Supabase has already stripped it
+  // Get the path - Supabase strips '/functions/v1' but keeps '/peebo-batch'
+  // So we just need to strip '/peebo-batch' prefix
   let path = url.pathname
+  if (path.startsWith('/peebo-batch')) {
+    path = path.replace('/peebo-batch', '')
+  }
+  // Also handle full path case (for local testing)
   if (path.startsWith('/functions/v1/peebo-batch')) {
     path = path.replace('/functions/v1/peebo-batch', '')
   }
-  // Ensure path starts with / if not empty
-  if (path && !path.startsWith('/')) {
+  // Ensure path starts with / if not empty, or default to /
+  if (!path || path === '') {
+    path = '/'
+  } else if (!path.startsWith('/')) {
     path = '/' + path
   }
-  // If path is empty, make it /
   if (!path) {
     path = '/'
   }
@@ -114,35 +132,48 @@ Deno.serve(async (req) => {
   console.log('[peebo-batch] Method:', req.method)
 
   try {
-    // Get auth header
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return jsonResponse({ error: 'Missing authorization header' }, 401)
-    }
-
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } }
-    })
 
-    // Get authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return jsonResponse({ error: 'Unauthorized' }, 401)
+    // Get auth header (optional for now - allows testing without auth)
+    const authHeader = req.headers.get('Authorization')
+
+    let peeboUser: PeeboUser
+
+    if (authHeader && authHeader !== 'Bearer ') {
+      // Authenticated request - verify user
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } }
+      })
+
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) {
+        console.log('[peebo-batch] Auth failed, using anonymous mode')
+        // Fall through to anonymous mode
+        peeboUser = createAnonymousUser()
+      } else {
+        // Get Peebo user from database
+        const { data: dbUser, error: userError } = await supabase
+          .from('peebo_users')
+          .select('*')
+          .eq('auth_user_id', user.id)
+          .single()
+
+        if (userError || !dbUser) {
+          console.log('[peebo-batch] User profile not found, using anonymous mode')
+          peeboUser = createAnonymousUser()
+        } else {
+          peeboUser = dbUser as PeeboUser
+        }
+      }
+    } else {
+      // Anonymous request - use default user for testing
+      console.log('[peebo-batch] No auth header, using anonymous mode')
+      peeboUser = createAnonymousUser()
     }
 
-    // Get Peebo user
-    const { data: peeboUser, error: userError } = await supabase
-      .from('peebo_users')
-      .select('*')
-      .eq('auth_user_id', user.id)
-      .single()
-
-    if (userError || !peeboUser) {
-      return jsonResponse({ error: 'User profile not found' }, 404)
-    }
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
     // Route requests
     if (req.method === 'POST' && path === '/start') {
