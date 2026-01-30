@@ -1,5 +1,5 @@
 // Peebo Batch Apply Edge Function
-// Handles bulk job application sessions with database persistence
+// Handles bulk job application sessions with REAL browser-use API
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -8,11 +8,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Browser-use Cloud API
+const BROWSER_USE_API_URL = 'https://api.browser-use.com/api/v2'
+
 // Types
 interface BatchSession {
   id: string
   user_id: string
-  status: 'setup' | 'scraping' | 'active' | 'complete' | 'stopped'
+  status: 'setup' | 'scraping' | 'active' | 'complete' | 'stopped' | 'paused'
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -62,6 +65,18 @@ interface StartBatchRequest {
   }
 }
 
+interface BrowserUseTaskResponse {
+  id: string
+  task_id?: string
+  state?: string
+  status?: string
+  live_url?: string
+  output?: string
+  steps?: Array<{ action: string; result: string }>
+  cost?: number
+  error?: string
+}
+
 // Generate UUID
 function generateUUID(): string {
   return crypto.randomUUID()
@@ -73,6 +88,15 @@ function jsonResponse(data: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
   })
+}
+
+// Get browser-use API key from environment
+function getBrowserUseApiKey(): string {
+  const key = Deno.env.get('BROWSER_USE_API_KEY') || Deno.env.get('PEEBO_BROWSER_USE_KEY')
+  if (!key) {
+    throw new Error('BROWSER_USE_API_KEY not configured')
+  }
+  return key
 }
 
 // Main handler
@@ -153,23 +177,20 @@ async function handleStartBatch(
   const sessionId = generateUUID()
   const criteriaSummary = formatCriteriaSummary(body.criteria)
 
-  // Generate mock jobs based on criteria for testing
-  const mockJobs = generateMockJobs(body.target_count, body.criteria)
-
-  // Create session in database
+  // Create session in database with scraping status
   const { error: insertError } = await supabase
     .from('batch_sessions')
     .insert({
       id: sessionId,
       user_id: 'anonymous',
-      status: 'active', // Skip scraping since we have mock jobs
+      status: 'scraping',
       started_at: new Date().toISOString(),
       config: {
         target_count: body.target_count,
         criteria_summary: criteriaSummary,
         resume_name: 'resume_optimized.txt'
       },
-      jobs: mockJobs,
+      jobs: [],
       total_cost: 0,
       completed_count: 0,
       failed_count: 0
@@ -180,14 +201,391 @@ async function handleStartBatch(
     return jsonResponse({ error: 'Failed to create session' }, 500)
   }
 
-  // Start background processing (simulate job applications)
-  startBatchProcessing(sessionId, supabase, body)
+  // Start job scraping with browser-use (async)
+  scrapeJobsWithBrowserUse(sessionId, supabase, body)
 
   return jsonResponse({
     session_id: sessionId,
-    status: 'active',
-    message: 'Batch session started, processing jobs...'
+    status: 'scraping',
+    message: 'Searching for matching jobs...'
   })
+}
+
+// Scrape jobs using browser-use Cloud API
+async function scrapeJobsWithBrowserUse(
+  sessionId: string,
+  supabase: ReturnType<typeof createClient>,
+  request: StartBatchRequest
+) {
+  try {
+    const apiKey = getBrowserUseApiKey()
+    const roles = request.criteria.target_roles?.join(', ') || 'Software Engineer'
+    const location = request.criteria.location || 'Remote'
+    const count = request.target_count
+
+    // Create browser-use task to scrape job listings
+    const scrapeTask = {
+      task: `Search for ${count} job openings matching these criteria:
+- Roles: ${roles}
+- Location: ${location}
+${request.criteria.salary_min ? `- Minimum salary: $${request.criteria.salary_min}` : ''}
+${request.criteria.industries?.length ? `- Industries: ${request.criteria.industries.join(', ')}` : ''}
+
+Instructions:
+1. Go to LinkedIn Jobs (linkedin.com/jobs) or Indeed (indeed.com)
+2. Search for "${roles}" in "${location}"
+3. Find ${count} job postings that match the criteria
+4. For each job, extract:
+   - Company name
+   - Job title/role
+   - Direct application URL (the actual job posting URL, not the search results)
+5. Return the results as a JSON array with format:
+   [{"company": "Company Name", "role": "Job Title", "job_url": "https://..."}]
+
+IMPORTANT: Only include jobs with direct application links. Skip jobs that require external redirects to company career pages without direct application forms.`,
+      max_steps: 30,
+      use_vision: true
+    }
+
+    console.log('[peebo-batch] Starting job scrape task...')
+
+    const response = await fetch(`${BROWSER_USE_API_URL}/tasks`, {
+      method: 'POST',
+      headers: {
+        'X-Browser-Use-API-Key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(scrapeTask)
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Browser-use API error: ${errorText}`)
+    }
+
+    const taskResult = await response.json() as BrowserUseTaskResponse
+    const scrapeTaskId = taskResult.id || taskResult.task_id
+
+    console.log('[peebo-batch] Scrape task created:', scrapeTaskId)
+
+    // Poll for scrape task completion
+    const jobs = await pollScrapeTask(scrapeTaskId, apiKey, request)
+
+    if (jobs.length === 0) {
+      await supabase
+        .from('batch_sessions')
+        .update({
+          status: 'complete',
+          completed_at: new Date().toISOString(),
+          jobs: []
+        })
+        .eq('id', sessionId)
+      return
+    }
+
+    // Update session with found jobs
+    await supabase
+      .from('batch_sessions')
+      .update({
+        status: 'active',
+        jobs: jobs
+      })
+      .eq('id', sessionId)
+
+    // Start applying to jobs
+    processJobApplications(sessionId, supabase, request, jobs)
+
+  } catch (error) {
+    console.error('[peebo-batch] Scrape error:', error)
+    await supabase
+      .from('batch_sessions')
+      .update({
+        status: 'complete',
+        completed_at: new Date().toISOString(),
+        jobs: []
+      })
+      .eq('id', sessionId)
+  }
+}
+
+// Poll scrape task until complete
+async function pollScrapeTask(
+  taskId: string,
+  apiKey: string,
+  request: StartBatchRequest
+): Promise<BatchJob[]> {
+  const maxAttempts = 60 // 5 minutes max
+  let attempts = 0
+
+  while (attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 5000)) // Poll every 5 seconds
+    attempts++
+
+    try {
+      const response = await fetch(`${BROWSER_USE_API_URL}/tasks/${taskId}`, {
+        headers: { 'X-Browser-Use-API-Key': apiKey }
+      })
+
+      if (!response.ok) {
+        console.error('[peebo-batch] Poll error:', response.status)
+        continue
+      }
+
+      const status = await response.json() as BrowserUseTaskResponse
+      console.log('[peebo-batch] Scrape task state:', status.state || status.status)
+
+      if (status.state === 'completed' || status.state === 'success' || status.status === 'completed') {
+        // Parse job listings from output
+        return parseJobListings(status.output || '', request)
+      }
+
+      if (status.state === 'failed' || status.status === 'failed') {
+        console.error('[peebo-batch] Scrape task failed:', status.error)
+        return []
+      }
+
+    } catch (error) {
+      console.error('[peebo-batch] Poll fetch error:', error)
+    }
+  }
+
+  console.error('[peebo-batch] Scrape task timed out')
+  return []
+}
+
+// Parse job listings from browser-use output
+function parseJobListings(output: string, request: StartBatchRequest): BatchJob[] {
+  const jobs: BatchJob[] = []
+
+  try {
+    // Try to find JSON array in output
+    const jsonMatch = output.match(/\[[\s\S]*\]/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      for (let i = 0; i < parsed.length && i < request.target_count; i++) {
+        const item = parsed[i]
+        jobs.push({
+          id: generateUUID(),
+          position: i + 1,
+          company: item.company || 'Unknown',
+          role: item.role || item.title || request.criteria.target_roles?.[0] || 'Unknown',
+          job_url: item.job_url || item.url || '',
+          status: 'queued',
+          browser_use_task_id: null,
+          live_url: null,
+          started_at: null,
+          completed_at: null,
+          current_step: null,
+          agent_success: null,
+          email_verified: false,
+          error_message: null,
+          cost: 0
+        })
+      }
+    }
+  } catch (error) {
+    console.error('[peebo-batch] Failed to parse job listings:', error)
+  }
+
+  return jobs
+}
+
+// Process job applications sequentially
+async function processJobApplications(
+  sessionId: string,
+  supabase: ReturnType<typeof createClient>,
+  request: StartBatchRequest,
+  jobs: BatchJob[]
+) {
+  const apiKey = getBrowserUseApiKey()
+
+  for (let i = 0; i < jobs.length; i++) {
+    // Check session status
+    const { data: session } = await supabase
+      .from('batch_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .single()
+
+    if (!session || session.status === 'stopped' || session.status === 'paused') {
+      console.log('[peebo-batch] Session stopped/paused, halting processing')
+      return
+    }
+
+    const job = jobs[i]
+    if (job.status !== 'queued') continue
+
+    // Update job to running
+    job.status = 'running'
+    job.started_at = new Date().toISOString()
+    job.current_step = 'Starting application...'
+
+    await supabase
+      .from('batch_sessions')
+      .update({ jobs })
+      .eq('id', sessionId)
+
+    try {
+      // Create browser-use task to apply
+      const applyTask = {
+        url: job.job_url,
+        task: `Apply to this job posting at ${job.company}.
+
+My Information:
+- Name: ${request.user_info.name}
+- Email: ${request.user_info.email}
+- Phone: ${request.user_info.phone || 'Not provided'}
+- LinkedIn: ${request.user_info.linkedin || 'Not provided'}
+
+Resume:
+${request.resume_text || 'Please fill in manually if required'}
+
+Instructions:
+1. You are at the job application page
+2. Click the "Apply" or "Apply Now" button
+3. Fill out all required fields with my information
+4. Upload or paste my resume if needed
+5. Answer any screening questions appropriately
+6. Submit the application
+7. Confirm the application was submitted successfully
+
+IMPORTANT: Stay on this page. Do NOT navigate to other jobs or search pages.`,
+        max_steps: 50,
+        use_vision: true
+      }
+
+      console.log(`[peebo-batch] Starting application for ${job.company}...`)
+
+      const response = await fetch(`${BROWSER_USE_API_URL}/tasks`, {
+        method: 'POST',
+        headers: {
+          'X-Browser-Use-API-Key': apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(applyTask)
+      })
+
+      if (!response.ok) {
+        throw new Error(`Browser-use API error: ${await response.text()}`)
+      }
+
+      const taskResult = await response.json() as BrowserUseTaskResponse
+      job.browser_use_task_id = taskResult.id || taskResult.task_id || null
+      job.live_url = taskResult.live_url || `https://cloud.browser-use.com/task/${job.browser_use_task_id}`
+
+      // Update with task ID
+      await supabase
+        .from('batch_sessions')
+        .update({ jobs })
+        .eq('id', sessionId)
+
+      // Poll for application completion
+      const result = await pollApplicationTask(job.browser_use_task_id!, apiKey, job, jobs, sessionId, supabase)
+
+      job.status = result.success ? 'success' : 'failed'
+      job.agent_success = result.success
+      job.completed_at = new Date().toISOString()
+      job.current_step = result.success ? 'Application submitted!' : 'Application failed'
+      job.cost = result.cost || 0
+      job.error_message = result.error || null
+
+    } catch (error) {
+      console.error(`[peebo-batch] Application error for ${job.company}:`, error)
+      job.status = 'failed'
+      job.agent_success = false
+      job.completed_at = new Date().toISOString()
+      job.current_step = 'Application failed'
+      job.error_message = error.message
+    }
+
+    // Update session with job result
+    const totalCost = jobs.reduce((sum, j) => sum + (j.cost || 0), 0)
+    await supabase
+      .from('batch_sessions')
+      .update({ jobs, total_cost: totalCost })
+      .eq('id', sessionId)
+  }
+
+  // Mark session as complete
+  const completedCount = jobs.filter(j => j.status === 'success').length
+  const failedCount = jobs.filter(j => j.status === 'failed').length
+
+  await supabase
+    .from('batch_sessions')
+    .update({
+      status: 'complete',
+      completed_at: new Date().toISOString(),
+      completed_count: completedCount,
+      failed_count: failedCount
+    })
+    .eq('id', sessionId)
+
+  console.log(`[peebo-batch] Session complete: ${completedCount} success, ${failedCount} failed`)
+}
+
+// Poll application task until complete
+async function pollApplicationTask(
+  taskId: string,
+  apiKey: string,
+  job: BatchJob,
+  jobs: BatchJob[],
+  sessionId: string,
+  supabase: ReturnType<typeof createClient>
+): Promise<{ success: boolean; cost?: number; error?: string }> {
+  const maxAttempts = 120 // 10 minutes max per application
+  let attempts = 0
+
+  while (attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 5000)) // Poll every 5 seconds
+    attempts++
+
+    // Check if session was stopped
+    const { data: session } = await supabase
+      .from('batch_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .single()
+
+    if (session?.status === 'stopped') {
+      return { success: false, error: 'Session stopped by user' }
+    }
+
+    try {
+      const response = await fetch(`${BROWSER_USE_API_URL}/tasks/${taskId}`, {
+        headers: { 'X-Browser-Use-API-Key': apiKey }
+      })
+
+      if (!response.ok) continue
+
+      const status = await response.json() as BrowserUseTaskResponse
+
+      // Update current step from task progress
+      if (status.steps && status.steps.length > 0) {
+        const lastStep = status.steps[status.steps.length - 1]
+        job.current_step = lastStep.action || 'Processing...'
+        await supabase.from('batch_sessions').update({ jobs }).eq('id', sessionId)
+      }
+
+      if (status.state === 'completed' || status.state === 'success' || status.status === 'completed') {
+        // Check if application was actually successful
+        const output = status.output || ''
+        const success = output.toLowerCase().includes('submit') ||
+                       output.toLowerCase().includes('success') ||
+                       output.toLowerCase().includes('applied') ||
+                       output.toLowerCase().includes('thank you')
+        return { success, cost: status.cost || 0.03 }
+      }
+
+      if (status.state === 'failed' || status.status === 'failed') {
+        return { success: false, cost: status.cost || 0, error: status.error || 'Task failed' }
+      }
+
+    } catch (error) {
+      console.error('[peebo-batch] Poll application error:', error)
+    }
+  }
+
+  return { success: false, error: 'Application timed out' }
 }
 
 // Get batch status
@@ -241,13 +639,28 @@ async function handleStopBatch(
     return jsonResponse({ error: 'Session not found' }, 404)
   }
 
-  // Stop all queued jobs
+  // Stop all queued/running jobs
   const jobs = (session.jobs || []).map((job: BatchJob) => {
     if (job.status === 'queued' || job.status === 'running') {
       return { ...job, status: 'stopped' }
     }
     return job
   })
+
+  // Try to cancel any running browser-use tasks
+  const apiKey = getBrowserUseApiKey()
+  for (const job of jobs) {
+    if (job.browser_use_task_id && job.status === 'stopped') {
+      try {
+        await fetch(`${BROWSER_USE_API_URL}/tasks/${job.browser_use_task_id}/cancel`, {
+          method: 'POST',
+          headers: { 'X-Browser-Use-API-Key': apiKey }
+        })
+      } catch (e) {
+        console.error('Failed to cancel browser-use task:', e)
+      }
+    }
+  }
 
   await supabase
     .from('batch_sessions')
@@ -320,158 +733,4 @@ function formatCriteriaSummary(criteria: StartBatchRequest['criteria']): string 
     parts.push(`Salary: $${Math.round(criteria.salary_min / 1000)}k+`)
   }
   return parts.join(' | ')
-}
-
-// Generate mock jobs for testing
-function generateMockJobs(count: number, criteria: StartBatchRequest['criteria']): BatchJob[] {
-  const companies = [
-    { name: 'Stripe', url: 'https://stripe.com/jobs' },
-    { name: 'Airbnb', url: 'https://careers.airbnb.com' },
-    { name: 'Figma', url: 'https://www.figma.com/careers' },
-    { name: 'Notion', url: 'https://www.notion.so/careers' },
-    { name: 'Linear', url: 'https://linear.app/careers' },
-    { name: 'Vercel', url: 'https://vercel.com/careers' },
-    { name: 'Supabase', url: 'https://supabase.com/careers' },
-    { name: 'Retool', url: 'https://retool.com/careers' },
-    { name: 'Loom', url: 'https://www.loom.com/careers' },
-    { name: 'Mercury', url: 'https://mercury.com/careers' }
-  ]
-
-  const role = criteria.target_roles?.[0] || 'Product Manager'
-
-  return companies.slice(0, count).map((company, index) => ({
-    id: generateUUID(),
-    position: index + 1,
-    company: company.name,
-    role: role,
-    job_url: company.url,
-    status: 'queued' as const,
-    browser_use_task_id: null,
-    live_url: `https://cloud.browser-use.com/task/${generateUUID()}`,
-    started_at: null,
-    completed_at: null,
-    current_step: null,
-    agent_success: null,
-    email_verified: false,
-    error_message: null,
-    cost: 0
-  }))
-}
-
-// Background processing - simulates applying to jobs
-async function startBatchProcessing(
-  sessionId: string,
-  supabase: ReturnType<typeof createClient>,
-  request: StartBatchRequest
-) {
-  // Process jobs sequentially with delays to simulate real applications
-  const processJob = async (jobIndex: number) => {
-    // Re-fetch session to get current state
-    const { data: session } = await supabase
-      .from('batch_sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .single()
-
-    if (!session || session.status === 'stopped' || session.status === 'paused') {
-      return // Stop processing
-    }
-
-    const jobs = session.jobs || []
-    if (jobIndex >= jobs.length) {
-      // All jobs processed
-      await supabase
-        .from('batch_sessions')
-        .update({
-          status: 'complete',
-          completed_at: new Date().toISOString(),
-          completed_count: jobs.filter((j: BatchJob) => j.status === 'success').length,
-          failed_count: jobs.filter((j: BatchJob) => j.status === 'failed').length
-        })
-        .eq('id', sessionId)
-      return
-    }
-
-    const job = jobs[jobIndex]
-    if (job.status !== 'queued') {
-      // Skip non-queued jobs
-      processJob(jobIndex + 1)
-      return
-    }
-
-    // Start this job
-    job.status = 'running'
-    job.started_at = new Date().toISOString()
-    job.current_step = 'Navigating to application page...'
-
-    await supabase
-      .from('batch_sessions')
-      .update({ jobs })
-      .eq('id', sessionId)
-
-    // Simulate application steps with delays
-    const steps = [
-      'Navigating to application page...',
-      'Clicking apply button...',
-      'Filling in personal information...',
-      'Uploading resume...',
-      'Answering screening questions...',
-      'Submitting application...',
-      'Confirming submission...'
-    ]
-
-    for (let i = 0; i < steps.length; i++) {
-      // Check if stopped
-      const { data: checkSession } = await supabase
-        .from('batch_sessions')
-        .select('status')
-        .eq('id', sessionId)
-        .single()
-
-      if (checkSession?.status === 'stopped' || checkSession?.status === 'paused') {
-        job.status = 'stopped'
-        await supabase
-          .from('batch_sessions')
-          .update({ jobs })
-          .eq('id', sessionId)
-        return
-      }
-
-      job.current_step = steps[i]
-      await supabase
-        .from('batch_sessions')
-        .update({ jobs })
-        .eq('id', sessionId)
-
-      // Simulate step taking 2-4 seconds
-      await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 2000))
-    }
-
-    // Complete job (90% success rate for demo)
-    const isSuccess = Math.random() > 0.1
-    job.status = isSuccess ? 'success' : 'failed'
-    job.agent_success = isSuccess
-    job.completed_at = new Date().toISOString()
-    job.current_step = isSuccess ? 'Application submitted successfully!' : 'Application failed'
-    job.cost = 0.02 + Math.random() * 0.03 // $0.02-0.05 per application
-    job.email_verified = isSuccess && Math.random() > 0.3 // 70% get confirmation emails
-
-    if (!isSuccess) {
-      job.error_message = 'Could not complete application - login required'
-    }
-
-    // Update total cost
-    const totalCost = jobs.reduce((sum: number, j: BatchJob) => sum + (j.cost || 0), 0)
-
-    await supabase
-      .from('batch_sessions')
-      .update({ jobs, total_cost: totalCost })
-      .eq('id', sessionId)
-
-    // Process next job after a short delay
-    setTimeout(() => processJob(jobIndex + 1), 1000)
-  }
-
-  // Start processing first job
-  processJob(0)
 }
