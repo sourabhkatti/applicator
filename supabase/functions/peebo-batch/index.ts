@@ -84,7 +84,8 @@ interface BrowserUseTaskResponse {
   state?: string
   status?: string
   live_url?: string
-  output?: string
+  output?: unknown  // Can be string, object, or array depending on API version
+  output_type?: string  // Some APIs include type separately
   steps?: Array<{ action: string; result: string }>
   cost?: number
   error?: string
@@ -447,13 +448,14 @@ function parseJobListings(output: string | object | unknown, request: StartBatch
 
   console.log('[peebo-batch] === PARSING JOB LISTINGS ===')
   console.log('[peebo-batch] Output type:', typeof output)
-  console.log('[peebo-batch] Output raw:', JSON.stringify(output)?.substring(0, 2000))
+  console.log('[peebo-batch] Output raw:', JSON.stringify(output)?.substring(0, 3000))
 
-  // Handle different output formats from browser-use API
+  // Handle different output formats from browser-use API v2
   let outputStr: string = ''
 
   if (typeof output === 'string') {
     outputStr = output
+    console.log('[peebo-batch] Output is a string, length:', output.length)
   } else if (output && typeof output === 'object') {
     // If output is already an array, return it directly
     if (Array.isArray(output)) {
@@ -462,29 +464,80 @@ function parseJobListings(output: string | object | unknown, request: StartBatch
     }
     // Try to extract from common wrapper formats
     const outputObj = output as Record<string, unknown>
-    if (outputObj.json) {
+    console.log('[peebo-batch] Output object keys:', Object.keys(outputObj))
+
+    // Browser-use v2 may return { json: "..." } or { json: [...] }
+    if (outputObj.json !== undefined) {
       if (typeof outputObj.json === 'string') {
         outputStr = outputObj.json
+        console.log('[peebo-batch] Extracted from output.json (string), length:', outputStr.length)
       } else if (Array.isArray(outputObj.json)) {
         console.log('[peebo-batch] Output.json is already an array with', outputObj.json.length, 'items')
         return convertParsedToJobs(outputObj.json, request)
+      } else if (outputObj.json && typeof outputObj.json === 'object') {
+        outputStr = JSON.stringify(outputObj.json)
+        console.log('[peebo-batch] Stringified output.json object')
       }
-    } else if (outputObj.result) {
+    }
+    // Try output.content (some APIs use this)
+    else if (outputObj.content !== undefined) {
+      if (typeof outputObj.content === 'string') {
+        outputStr = outputObj.content
+        console.log('[peebo-batch] Extracted from output.content')
+      } else if (Array.isArray(outputObj.content)) {
+        return convertParsedToJobs(outputObj.content, request)
+      }
+    }
+    // Try output.data
+    else if (outputObj.data !== undefined) {
+      if (typeof outputObj.data === 'string') {
+        outputStr = outputObj.data
+        console.log('[peebo-batch] Extracted from output.data')
+      } else if (Array.isArray(outputObj.data)) {
+        return convertParsedToJobs(outputObj.data, request)
+      }
+    }
+    // Try output.result
+    else if (outputObj.result !== undefined) {
       if (typeof outputObj.result === 'string') {
         outputStr = outputObj.result
+        console.log('[peebo-batch] Extracted from output.result')
       } else if (Array.isArray(outputObj.result)) {
         return convertParsedToJobs(outputObj.result, request)
       }
-    } else if (outputObj.value) {
+    }
+    // Try output.value
+    else if (outputObj.value !== undefined) {
       if (typeof outputObj.value === 'string') {
         outputStr = outputObj.value
+        console.log('[peebo-batch] Extracted from output.value')
       } else if (Array.isArray(outputObj.value)) {
         return convertParsedToJobs(outputObj.value, request)
       }
-    } else {
+    }
+    // Try output.text (another common pattern)
+    else if (outputObj.text !== undefined && typeof outputObj.text === 'string') {
+      outputStr = outputObj.text
+      console.log('[peebo-batch] Extracted from output.text')
+    }
+    else {
       // Try JSON.stringify and parse as string
       outputStr = JSON.stringify(output)
+      console.log('[peebo-batch] Stringified entire output object')
     }
+  }
+
+  // Handle various "json" prefix formats from browser-use API
+  // Format: "json\n[...]" or "json[...]" or "json [...}"
+  if (outputStr.startsWith('json\n') || outputStr.startsWith('json\r\n')) {
+    outputStr = outputStr.replace(/^json[\r\n]+/, '')
+    console.log('[peebo-batch] Stripped "json\\n" prefix label')
+  } else if (outputStr.startsWith('json[') || outputStr.startsWith('json {')) {
+    outputStr = outputStr.replace(/^json\s*/, '')
+    console.log('[peebo-batch] Stripped "json" prefix (no newline)')
+  } else if (outputStr.startsWith('json ')) {
+    outputStr = outputStr.replace(/^json\s+/, '')
+    console.log('[peebo-batch] Stripped "json " prefix with space')
   }
 
   console.log('[peebo-batch] Output string length:', outputStr?.length || 0)
@@ -720,10 +773,17 @@ async function checkScrapeTaskStatus(
     }
 
     const status = await response.json() as BrowserUseTaskResponse
-    console.log('[peebo-batch] Scrape task response:', JSON.stringify({ state: status.state, status: status.status, error: status.error }))
+    console.log('[peebo-batch] Scrape task response state:', status.state, 'status:', status.status)
     console.log('[peebo-batch] Full status object keys:', Object.keys(status))
     console.log('[peebo-batch] Output field type:', typeof status.output)
-    console.log('[peebo-batch] Output field preview:', JSON.stringify(status.output)?.substring(0, 1000))
+    console.log('[peebo-batch] Output field is array:', Array.isArray(status.output))
+    if (status.output && typeof status.output === 'object' && !Array.isArray(status.output)) {
+      console.log('[peebo-batch] Output object keys:', Object.keys(status.output as object))
+    }
+    console.log('[peebo-batch] Output field preview:', JSON.stringify(status.output)?.substring(0, 2000))
+    if (status.output_type) {
+      console.log('[peebo-batch] Output type field:', status.output_type)
+    }
 
     const taskState = (status.state || status.status || '').toLowerCase()
     const isComplete = ['completed', 'success', 'succeeded', 'finished', 'done'].includes(taskState)
@@ -802,39 +862,89 @@ async function startJobApplication(
     const firstName = nameParts[0] || ''
     const lastName = nameParts.slice(1).join(' ') || ''
 
+    // Truncate resume if too long (browser-use has input limits)
+    const resumeText = (request.resume_text || '').substring(0, 4000)
+
     const applyTask = {
       url: job.job_url,
-      task: `Apply to this ${job.company} job. Fill out the application form and submit it.
+      task: `Apply to this ${job.company} ${job.role} job. Follow these phases IN ORDER.
 
-APPLICANT INFORMATION (use these EXACT values for each field):
+## PHASE 1: SCAN THE FORM FIRST
+
+Before filling ANYTHING:
+1. Click the "Apply" or "Apply for this job" button if needed to open the form
+2. Scroll through the ENTIRE form from top to bottom
+3. Identify ALL required fields - look for:
+   - Fields marked with * (asterisk)
+   - Fields with "required" label
+   - Red highlighting or error styling
+4. Count how many required fields there are
+
+Common required fields on job forms:
+- First Name, Last Name
+- Email, Phone
+- Resume/CV
+- LinkedIn URL
+- Location
+- Work authorization questions
+
+## PHASE 2: FILL ALL REQUIRED FIELDS
+
+Use these EXACT values for each field:
+
+PERSONAL INFO:
 • First Name: ${firstName}
 • Last Name: ${lastName}
+• Full Name (if combined field): ${request.user_info?.name || ''}
 • Email: ${request.user_info?.email || ''}
 • Phone: ${request.user_info?.phone || ''}
-• LinkedIn URL: ${request.user_info?.linkedin || ''}
-• Location: San Francisco, CA
+• LinkedIn: ${request.user_info?.linkedin || ''}
+• Location/City: San Francisco, CA
 
-RESUME TEXT (copy this into resume/cover letter fields if needed):
-${request.resume_text || ''}
+RESUME/CV:
+- Look for "Enter manually" or "Paste text" option (NOT file upload)
+- If you must paste text, use this resume:
+${resumeText}
 
-INSTRUCTIONS:
-1. Click "Apply" or "Apply for this job" button
-2. Fill each form field with the EXACT value listed above - do NOT combine fields
-3. For resume upload: click "Enter manually" or paste the resume text
-4. For screening questions: Yes to work authorization, No to visa sponsorship needed
-5. Click Submit/Send Application button
-6. Wait for confirmation page
+SCREENING QUESTIONS (common answers):
+• Authorized to work in US? → Yes
+• Require sponsorship? → No
+• How did you hear about us? → LinkedIn or Company website
+• Willing to relocate? → Yes
+• Salary expectations? → Leave blank OR "Competitive"
 
-IMPORTANT: Each field must contain ONLY its designated value. First Name field = "${firstName}" only.
+Fill EVERY required field. Do NOT skip any field marked with *.
 
-Report "APPLICATION_SUBMITTED_SUCCESSFULLY" if you see a thank you/confirmation page.
-Report "APPLICATION_FAILED: <reason>" if you cannot submit.`,
-      max_steps: 30,
+## PHASE 3: VERIFY BEFORE SUBMIT
+
+STOP before clicking submit. Check:
+1. Scroll through entire form again
+2. Every field with * must have a value
+3. No red error messages visible
+4. No empty required fields
+
+If you see ANY missing required field, fill it NOW before proceeding.
+
+## PHASE 4: SUBMIT
+
+Only when ALL required fields are filled:
+1. Click Submit / Send Application / Apply Now button
+2. Wait 3-5 seconds for page response
+3. If error appears about missing fields:
+   - READ the error message
+   - FILL the specific field mentioned
+   - DO NOT just click submit again
+   - Verify all fields, then submit
+
+REPORT:
+- "APPLICATION_SUBMITTED_SUCCESSFULLY" → You see thank you/confirmation page
+- "APPLICATION_FAILED: [specific reason]" → Cannot complete after trying`,
+      max_steps: 50,
       step_timeout: 60,
       use_vision: true
     }
 
-    console.log(`[peebo-batch] Starting application for ${job.company}...`)
+    console.log(`[peebo-batch] Starting application for ${job.company} - ${job.role}...`)
 
     const response = await fetch(`${BROWSER_USE_API_URL}/tasks`, {
       method: 'POST',
