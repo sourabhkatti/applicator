@@ -2667,7 +2667,21 @@ async function startBatch() {
   `;
 
   try {
-    const criteria = trackerData.settings?.applicant || {};
+    // Read form values directly to ensure latest values are used
+    const targetCountInput = document.getElementById('batch-job-count');
+    const actualTargetCount = targetCountInput ? parseInt(targetCountInput.value) || 5 : (batchConfig.targetCount || 5);
+
+    // Read from batchCriteria (saved by setup form) and applicant config
+    const batchCriteria = trackerData.settings?.batchCriteria || {};
+    const applicant = trackerData.settings?.applicant || {};
+
+    // Parse roles from comma-separated string to array
+    const rolesString = batchCriteria.roles || '';
+    const targetRoles = rolesString ? rolesString.split(',').map(r => r.trim()).filter(r => r) : ['Product Manager'];
+
+    // Parse industries similarly
+    const industriesString = batchCriteria.industries || '';
+    const industries = industriesString ? industriesString.split(',').map(i => i.trim()).filter(i => i) : [];
 
     // Get Supabase auth token
     const authToken = await getSupabaseAuthToken();
@@ -2683,19 +2697,19 @@ async function startBatch() {
         'Authorization': `Bearer ${authToken}`
       },
       body: JSON.stringify({
-        target_count: batchConfig.targetCount,
+        target_count: actualTargetCount,
         criteria: {
-          target_roles: batchConfig.targetRoles || criteria.target_roles || [],
-          location: batchConfig.location || criteria.location_preference || 'Remote',
-          salary_min: batchConfig.salaryMin || criteria.salary_minimum || null,
-          industries: batchConfig.industries || criteria.industries || []
+          target_roles: targetRoles,
+          location: batchCriteria.location || 'Remote',
+          salary_min: batchCriteria.salary ? batchCriteria.salary * 1000 : null,
+          industries: industries
         },
-        resume_text: criteria.resume_text || '',
+        resume_text: applicant.resume_text || '',
         user_info: {
-          name: criteria.name || '',
-          email: criteria.email || '',
-          phone: criteria.phone || '',
-          linkedin: criteria.linkedin_url || ''
+          name: applicant.name || '',
+          email: applicant.email || '',
+          phone: applicant.phone || '',
+          linkedin: applicant.linkedin_url || ''
         }
       })
     });
@@ -2707,22 +2721,26 @@ async function startBatch() {
 
     const result = await response.json();
 
+    // Build criteria summary string
+    const criteriaSummary = `${targetRoles.join(', ')} in ${batchCriteria.location || 'Remote'}`;
+
     // Store session ID for polling
     batchSession = {
       id: result.session_id,
-      status: 'scraping',
+      status: result.status || 'scraping',
+      scrape_task_id: result.scrape_task_id || null,
       created_at: new Date().toISOString(),
       started_at: new Date().toISOString(),
       completed_at: null,
       config: {
-        target_count: batchConfig.targetCount,
-        criteria_summary: formatBatchCriteria(criteria),
-        resume_name: batchConfig.resumeName
+        target_count: actualTargetCount,
+        criteria_summary: criteriaSummary,
+        resume_name: batchConfig.resumeName || 'resume.txt'
       },
-      jobs: [],
-      total_cost: 0,
-      completed_count: 0,
-      failed_count: 0
+      jobs: result.jobs || [],
+      total_cost: result.total_cost || 0,
+      completed_count: result.completed_count || 0,
+      failed_count: result.failed_count || 0
     };
 
     // Save session to storage
@@ -2750,14 +2768,18 @@ async function startBatch() {
 }
 
 /**
- * Get Supabase auth token from chrome.storage, localStorage, or Flask session
+ * Get Supabase auth token from chrome.storage, localStorage, or use anon key
  */
 async function getSupabaseAuthToken() {
+  // Supabase anon key - works for edge functions that don't require user auth
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRpcGxxcGhicWxvbWN2bHVqY3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMwNjYzNDAsImV4cCI6MjA2ODY0MjM0MH0.Nm1cSh_fQZvKeqMyZ-DVGKDiDz_Iu6hyclV064t1z_w';
+
   // Try chrome.storage first (extension context)
   if (typeof chrome !== 'undefined' && chrome.storage) {
     return new Promise((resolve) => {
       chrome.storage.local.get(['session'], (result) => {
-        resolve(result.session?.access_token || '');
+        const token = result.session?.access_token;
+        resolve(token || SUPABASE_ANON_KEY);
       });
     });
   }
@@ -2776,14 +2798,9 @@ async function getSupabaseAuthToken() {
     console.error('[Auth] Failed to read localStorage:', e);
   }
 
-  // Fall back to Flask session
-  try {
-    const response = await fetch('/api/auth_token');
-    const data = await response.json();
-    return data.token || '';
-  } catch {
-    return '';
-  }
+  // Use anon key as fallback (allows calling edge functions without user auth)
+  console.log('[Auth] Using anon key');
+  return SUPABASE_ANON_KEY;
 }
 
 /**
@@ -2830,8 +2847,17 @@ async function checkAgentMailVerification() {
   try {
     // Trigger AgentMail sync via Flask endpoint
     const response = await fetch('/api/trigger_email_sync', { method: 'POST' });
-    if (response.ok) {
-      // Reload data to get email_verified updates
+    if (!response.ok) {
+      console.error('[Batch] AgentMail sync failed:', response.status);
+      return;
+    }
+
+    const result = await response.json();
+    console.log('[Batch] AgentMail sync result:', result);
+
+    if (result.emails_verified && result.emails_verified > 0) {
+      // Only refresh if emails were actually verified
+      console.log('[Batch] Verified', result.emails_verified, 'emails, refreshing UI');
       await refreshUI();
     }
   } catch (error) {
@@ -3086,9 +3112,6 @@ function startBatchPolling() {
       batchSession.completed_count = data.summary?.completed || 0;
       batchSession.failed_count = data.summary?.failed || 0;
 
-      trackerData.settings.batch_session = batchSession;
-      await storage.save(trackerData);
-
       // Update UI based on status
       if (data.status === 'active' && batchPanelState !== 'active') {
         batchPanelState = 'active';
@@ -3096,16 +3119,42 @@ function startBatchPolling() {
         batchPanelState = data.status;
         stopBatchPolling();
 
-        // Add successful jobs to tracker
+        // Add successful jobs to tracker (modify trackerData.jobs directly to avoid multiple saves)
         for (const job of data.jobs || []) {
-          if (job.agent_success) {
-            await addBatchJobToTracker(job);
+          if (job.agent_success === true) {
+            const existingJob = trackerData.jobs.find(j =>
+              j.jobUrl === job.job_url ||
+              (j.company === job.company && j.role === job.role)
+            );
+
+            if (existingJob) {
+              existingJob.status = 'applied';
+              existingJob.lastActivityDate = new Date().toISOString().split('T')[0];
+              existingJob.notes = (existingJob.notes || '') + `\n[Batch] Applied via Peebo on ${new Date().toLocaleDateString()}`;
+            } else {
+              trackerData.jobs.push({
+                id: generateUUID(),
+                company: job.company,
+                role: job.role,
+                status: 'applied',
+                dateApplied: new Date().toISOString().split('T')[0],
+                lastActivityDate: new Date().toISOString().split('T')[0],
+                jobUrl: job.job_url,
+                nextAction: 'Wait for response',
+                notes: `Applied via Peebo batch apply. Cost: $${job.cost?.toFixed(4) || '0.00'}`,
+                email_verified: job.email_verified || false
+              });
+            }
           }
         }
 
         // Check AgentMail for email verification
         await checkAgentMailVerification();
       }
+
+      // Single save after all modifications
+      trackerData.settings.batch_session = batchSession;
+      await storage.save(trackerData);
 
       if (currentPanel === 'batch') {
         renderBatchPanel();
