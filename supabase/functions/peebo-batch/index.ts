@@ -284,14 +284,16 @@ Instructions:
    - Company name (from the page or URL)
    - Job title/role
    - The current page URL (the direct job posting URL)
-5. Return the results as a JSON array with format:
-   [{"company": "Company Name", "role": "Job Title", "job_url": "https://..."}]
 
-IMPORTANT:
+OUTPUT FORMAT - THIS IS CRITICAL:
+Your FINAL output MUST be ONLY a valid JSON array, nothing else. No explanations, no markdown, no extra text.
+Example: [{"company": "Acme", "role": "PM", "job_url": "https://..."}]
+
+REQUIREMENTS:
 - Visit the actual job posting pages, not just the search results
 - Only include direct application URLs from Greenhouse, Lever, or Ashby job boards
-- These sites have easy-to-find "Apply" buttons
-- If a search doesn't yield results, try simplifying to just "${roles}" jobs site:greenhouse.io`,
+- If a search doesn't yield results, try simplifying to just "${roles}" jobs site:greenhouse.io
+- Your final response must be ONLY the JSON array - no other text`,
     max_steps: 40,
     use_vision: true
   }
@@ -440,34 +442,113 @@ async function handleDirectJobs(
 }
 
 // Parse job listings from browser-use output
-function parseJobListings(output: string, request: StartBatchRequest): BatchJob[] {
+function parseJobListings(output: string | object | unknown, request: StartBatchRequest): BatchJob[] {
   const jobs: BatchJob[] = []
 
   console.log('[peebo-batch] === PARSING JOB LISTINGS ===')
-  console.log('[peebo-batch] Output length:', output?.length || 0)
-  console.log('[peebo-batch] Output preview (first 2000 chars):', (output || '').substring(0, 2000))
+  console.log('[peebo-batch] Output type:', typeof output)
+  console.log('[peebo-batch] Output raw:', JSON.stringify(output)?.substring(0, 2000))
 
-  if (!output) {
+  // Handle different output formats from browser-use API
+  let outputStr: string = ''
+
+  if (typeof output === 'string') {
+    outputStr = output
+  } else if (output && typeof output === 'object') {
+    // If output is already an array, return it directly
+    if (Array.isArray(output)) {
+      console.log('[peebo-batch] Output is already an array with', output.length, 'items')
+      return convertParsedToJobs(output, request)
+    }
+    // Try to extract from common wrapper formats
+    const outputObj = output as Record<string, unknown>
+    if (outputObj.json) {
+      if (typeof outputObj.json === 'string') {
+        outputStr = outputObj.json
+      } else if (Array.isArray(outputObj.json)) {
+        console.log('[peebo-batch] Output.json is already an array with', outputObj.json.length, 'items')
+        return convertParsedToJobs(outputObj.json, request)
+      }
+    } else if (outputObj.result) {
+      if (typeof outputObj.result === 'string') {
+        outputStr = outputObj.result
+      } else if (Array.isArray(outputObj.result)) {
+        return convertParsedToJobs(outputObj.result, request)
+      }
+    } else if (outputObj.value) {
+      if (typeof outputObj.value === 'string') {
+        outputStr = outputObj.value
+      } else if (Array.isArray(outputObj.value)) {
+        return convertParsedToJobs(outputObj.value, request)
+      }
+    } else {
+      // Try JSON.stringify and parse as string
+      outputStr = JSON.stringify(output)
+    }
+  }
+
+  console.log('[peebo-batch] Output string length:', outputStr?.length || 0)
+  console.log('[peebo-batch] Output string preview (first 2000 chars):', (outputStr || '').substring(0, 2000))
+
+  if (!outputStr) {
     console.error('[peebo-batch] No output to parse')
     return jobs
   }
 
   let parsed: any[] = []
 
-  // Strategy 1: Look for JSON array starting with job objects (non-greedy)
-  const arrayMatch = output.match(/\[\s*\{\s*"company"[\s\S]*?\}\s*\]/)
-  if (arrayMatch) {
-    try {
-      parsed = JSON.parse(arrayMatch[0])
-      console.log('[peebo-batch] Strategy 1 (non-greedy array) SUCCESS:', parsed.length, 'jobs')
-    } catch (e) {
-      console.log('[peebo-batch] Strategy 1 failed:', (e as Error).message)
+  // Strategy 0: Strip common prefixes (json, JSON, Here are the jobs:) and try parsing
+  const cleanedOutput = outputStr
+    .replace(/^[\s\S]*?([\[{])/m, '$1')  // Remove everything before first [ or {
+    .trim()
+
+  if (cleanedOutput.startsWith('[')) {
+    // Find the matching closing bracket by counting
+    let depth = 0
+    let endIndex = -1
+    for (let i = 0; i < cleanedOutput.length; i++) {
+      if (cleanedOutput[i] === '[') depth++
+      else if (cleanedOutput[i] === ']') {
+        depth--
+        if (depth === 0) {
+          endIndex = i
+          break
+        }
+      }
+    }
+    if (endIndex > 0) {
+      try {
+        const jsonStr = cleanedOutput.substring(0, endIndex + 1)
+        parsed = JSON.parse(jsonStr)
+        console.log('[peebo-batch] Strategy 0 (bracket matching) SUCCESS:', parsed.length, 'jobs')
+      } catch (e) {
+        console.log('[peebo-batch] Strategy 0 failed:', (e as Error).message)
+      }
+    }
+  }
+
+  // Strategy 1: Look for JSON array with job objects (greedy, find last ])
+  if (!parsed.length) {
+    const startMatch = outputStr.match(/\[\s*\{\s*"company"/)
+    if (startMatch && startMatch.index !== undefined) {
+      const startIdx = startMatch.index
+      // Find the last ] in the outputStr after startIdx
+      const lastBracket = outputStr.lastIndexOf(']')
+      if (lastBracket > startIdx) {
+        try {
+          const jsonStr = outputStr.substring(startIdx, lastBracket + 1)
+          parsed = JSON.parse(jsonStr)
+          console.log('[peebo-batch] Strategy 1 (greedy array) SUCCESS:', parsed.length, 'jobs')
+        } catch (e) {
+          console.log('[peebo-batch] Strategy 1 failed:', (e as Error).message)
+        }
+      }
     }
   }
 
   // Strategy 2: Extract from markdown code block
   if (!parsed.length) {
-    const codeMatch = output.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/)
+    const codeMatch = outputStr.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/)
     if (codeMatch) {
       try {
         parsed = JSON.parse(codeMatch[1])
@@ -482,7 +563,7 @@ function parseJobListings(output: string, request: StartBatchRequest): BatchJob[
   if (!parsed.length) {
     const jobPattern = /\{\s*"company"\s*:\s*"([^"]+)"\s*,\s*"role"\s*:\s*"([^"]+)"\s*,\s*"job_url"\s*:\s*"([^"]+)"\s*\}/g
     let match
-    while ((match = jobPattern.exec(output)) !== null) {
+    while ((match = jobPattern.exec(outputStr)) !== null) {
       parsed.push({ company: match[1], role: match[2], job_url: match[3] })
     }
     if (parsed.length) {
@@ -490,10 +571,10 @@ function parseJobListings(output: string, request: StartBatchRequest): BatchJob[
     }
   }
 
-  // Strategy 4: Try parsing entire output as JSON array
+  // Strategy 4: Try parsing entire outputStr as JSON array
   if (!parsed.length) {
     try {
-      const trimmed = output.trim()
+      const trimmed = outputStr.trim()
       if (trimmed.startsWith('[')) {
         const fullParse = JSON.parse(trimmed)
         if (Array.isArray(fullParse)) {
@@ -508,12 +589,18 @@ function parseJobListings(output: string, request: StartBatchRequest): BatchJob[
 
   if (!parsed.length) {
     console.error('[peebo-batch] ALL PARSING STRATEGIES FAILED')
-    console.error('[peebo-batch] Raw output sample:', output.substring(0, 1000))
+    console.error('[peebo-batch] Raw output sample:', outputStr.substring(0, 1000))
     return jobs
   }
 
-  // Convert to BatchJob format
+  return convertParsedToJobs(parsed, request)
+}
+
+// Helper to convert parsed job array to BatchJob format
+function convertParsedToJobs(parsed: any[], request: StartBatchRequest): BatchJob[] {
+  const jobs: BatchJob[] = []
   const targetCount = request?.target_count || 5
+
   for (let i = 0; i < parsed.length && i < targetCount; i++) {
     const item = parsed[i]
     const jobUrl = item.job_url || item.url || item.link || ''
@@ -634,6 +721,9 @@ async function checkScrapeTaskStatus(
 
     const status = await response.json() as BrowserUseTaskResponse
     console.log('[peebo-batch] Scrape task response:', JSON.stringify({ state: status.state, status: status.status, error: status.error }))
+    console.log('[peebo-batch] Full status object keys:', Object.keys(status))
+    console.log('[peebo-batch] Output field type:', typeof status.output)
+    console.log('[peebo-batch] Output field preview:', JSON.stringify(status.output)?.substring(0, 1000))
 
     const taskState = (status.state || status.status || '').toLowerCase()
     const isComplete = ['completed', 'success', 'succeeded', 'finished', 'done'].includes(taskState)
