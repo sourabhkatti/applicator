@@ -187,6 +187,10 @@ async function handleNativeCommand(command) {
         result = await handleExtractDOM(params);
         break;
 
+      case 'execute_script':
+        result = await handleExecuteScript(params);
+        break;
+
       case 'scroll':
         result = await handleScrollNative(params);
         break;
@@ -458,6 +462,37 @@ async function handleExtractDOM(params) {
 
   } catch (e) {
     console.error('[Peebo] extract_dom failed:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function handleExecuteScript(params) {
+  const { script } = params;
+
+  if (!controlledTabId) {
+    return { success: false, error: 'No tab attached' };
+  }
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: controlledTabId },
+      func: (code) => {
+        try {
+          return eval(code);
+        } catch (e) {
+          return { error: e.message };
+        }
+      },
+      args: [script],
+      world: 'MAIN'  // Execute in page context for full access
+    });
+
+    return {
+      success: true,
+      result: results[0]?.result
+    };
+  } catch (e) {
+    console.error('[Peebo] execute_script failed:', e);
     return { success: false, error: e.message };
   }
 }
