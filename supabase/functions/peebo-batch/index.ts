@@ -284,24 +284,24 @@ ${body.criteria.salary_min ? `- Minimum salary: $${body.criteria.salary_min}` : 
 ${body.criteria.industries?.length ? `- Industries: ${body.criteria.industries.join(', ')}` : ''}
 
 Instructions:
-1. Go to Google and search: "${roles}" jobs "${location}" site:greenhouse.io OR site:lever.co OR site:jobs.ashbyhq.com
-2. Click on the job listing links from the search results (NOT the main search page)
-3. Find ${count} different job postings from different companies
+1. Go to Google and search: "${roles}" jobs "${location}" site:jobs.ashbyhq.com
+2. Click on the job listing links from the search results - these will take you directly to job application pages
+3. Find ${count} different job postings from different companies on Ashby
 4. For each job posting page you visit, extract:
    - Company name (from the page or URL)
    - Job title/role
-   - The current page URL (the direct job posting URL)
+   - The current page URL (the direct job posting URL ending in jobs.ashbyhq.com/...)
 
 OUTPUT FORMAT - THIS IS CRITICAL:
 Your FINAL output MUST be ONLY a valid JSON array, nothing else. No explanations, no markdown, no extra text.
-Example: [{"company": "Acme", "role": "PM", "job_url": "https://..."}]
+Example: [{"company": "Acme", "role": "PM", "job_url": "https://jobs.ashbyhq.com/acme/abc123"}]
 
 REQUIREMENTS:
-- Visit the actual job posting pages, not just the search results
-- Only include direct application URLs from Greenhouse, Lever, or Ashby job boards
-- If a search doesn't yield results, try simplifying to just "${roles}" jobs site:greenhouse.io
+- Only include direct application URLs from Ashby (jobs.ashbyhq.com)
+- Each URL should be a specific job posting, not a company careers page
+- If the first search doesn't yield results, try: "${roles}" site:jobs.ashbyhq.com
 - Your final response must be ONLY the JSON array - no other text`,
-    max_steps: 40,
+    max_steps: 50,
     use_vision: true
   }
 
