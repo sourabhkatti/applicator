@@ -1509,11 +1509,16 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // Initialize AgentMail sync when extension starts
 chrome.runtime.onStartup.addListener(() => {
   startAgentMailSync();
+  connectNativeHost();
 });
 
 // Also start on install/update
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install' || details.reason === 'update') {
     startAgentMailSync();
+    connectNativeHost();
   }
 });
+
+// Connect native host immediately when service worker loads
+connectNativeHost();
