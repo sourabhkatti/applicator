@@ -19,6 +19,606 @@ const AGENTMAIL_DEFAULT_API_KEY = 'am_c036eda64cf94089f047014b8403136c22f12b143c
 // State
 const activeTasks = new Map();
 
+// ============================================
+// Native Messaging Configuration
+// ============================================
+const NATIVE_HOST_NAME = 'com.peebo.extension';
+
+// Native messaging state
+let nativePort = null;
+let controlledTabId = null;
+let debuggerAttached = false;
+let debuggerTabId = null;
+let pendingRequests = new Map();
+
+// Track tabs for cleanup
+let visualTabIds = new Set();
+let appOpenedTabIds = new Set();
+let primaryTabId = null;
+
+// ============================================
+// Native Messaging Connection
+// ============================================
+
+function connectNativeHost() {
+  if (nativePort) {
+    console.log('[Peebo] Native host already connected');
+    return;
+  }
+
+  try {
+    nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+    console.log('[Peebo] Connected to native host');
+
+    nativePort.onMessage.addListener(handleNativeMessage);
+
+    nativePort.onDisconnect.addListener(() => {
+      const error = chrome.runtime.lastError;
+      console.log('[Peebo] Native host disconnected:', error?.message || 'No error');
+      nativePort = null;
+      debuggerAttached = false;
+      debuggerTabId = null;
+    });
+
+  } catch (e) {
+    console.error('[Peebo] Failed to connect to native host:', e);
+  }
+}
+
+function sendToNative(message) {
+  if (!nativePort) {
+    console.warn('[Peebo] Cannot send - native host not connected');
+    return false;
+  }
+  try {
+    nativePort.postMessage(message);
+    return true;
+  } catch (e) {
+    console.error('[Peebo] Failed to send to native host:', e);
+    return false;
+  }
+}
+
+// Handle messages from native host (Python client)
+function handleNativeMessage(message) {
+  console.log('[Peebo] Received from native:', message.type || message.id);
+
+  // Check if this is a response to a pending request
+  if (message.id && pendingRequests.has(message.id)) {
+    const resolver = pendingRequests.get(message.id);
+    pendingRequests.delete(message.id);
+    resolver(message);
+    return;
+  }
+
+  // Otherwise, it's a command from Python client
+  handleNativeCommand(message);
+}
+
+// ============================================
+// CDP Debugger Management
+// ============================================
+
+async function attachDebugger(tabId) {
+  if (debuggerAttached && debuggerTabId === tabId) return true;
+
+  // Detach from previous tab if needed
+  if (debuggerAttached && debuggerTabId) {
+    try {
+      await chrome.debugger.detach({ tabId: debuggerTabId });
+    } catch (e) {
+      // Tab may be closed
+    }
+  }
+
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    debuggerAttached = true;
+    debuggerTabId = tabId;
+
+    chrome.debugger.onDetach.addListener((source) => {
+      if (source.tabId === tabId) {
+        debuggerAttached = false;
+        debuggerTabId = null;
+      }
+    });
+
+    console.log('[Peebo] Debugger attached to tab:', tabId);
+    return true;
+  } catch (e) {
+    console.error('[Peebo] Debugger attach failed:', e);
+    return false;
+  }
+}
+
+async function detachDebugger() {
+  if (!debuggerAttached || !debuggerTabId) return;
+
+  try {
+    await chrome.debugger.detach({ tabId: debuggerTabId });
+  } catch (e) {
+    // Tab may be closed
+  }
+  debuggerAttached = false;
+  debuggerTabId = null;
+}
+
+async function ensureDebuggerAttached(tabId) {
+  return await attachDebugger(tabId);
+}
+
+// ============================================
+// Native Command Handler
+// ============================================
+
+async function handleNativeCommand(command) {
+  const { id, type, params } = command;
+
+  try {
+    let result;
+    switch (type) {
+      case 'ping':
+        sendToNative({ id, type: 'pong', success: true });
+        return;
+
+      case 'attach_active_tab':
+        result = await handleAttachActiveTab(params);
+        break;
+
+      case 'navigate':
+        result = await handleNavigateNative(params);
+        break;
+
+      case 'click':
+        await ensureDebuggerAttached(controlledTabId);
+        result = await handleClickNative(params);
+        break;
+
+      case 'type':
+        result = await handleTypeNative(params);
+        break;
+
+      case 'hover':
+        await ensureDebuggerAttached(controlledTabId);
+        result = await handleHoverNative(params);
+        break;
+
+      case 'extract_dom':
+        result = await handleExtractDOM(params);
+        break;
+
+      case 'scroll':
+        result = await handleScrollNative(params);
+        break;
+
+      case 'send_keys':
+        await ensureDebuggerAttached(controlledTabId);
+        result = await handleSendKeysNative(params);
+        break;
+
+      case 'go_back':
+        await chrome.tabs.goBack(controlledTabId);
+        result = { success: true };
+        break;
+
+      case 'go_forward':
+        await chrome.tabs.goForward(controlledTabId);
+        result = { success: true };
+        break;
+
+      case 'refresh':
+        await chrome.tabs.reload(controlledTabId);
+        result = { success: true };
+        break;
+
+      case 'get_url':
+        const tab = await chrome.tabs.get(controlledTabId);
+        result = { success: true, url: tab.url };
+        break;
+
+      case 'detach_tab':
+        await detachDebugger();
+        result = { success: true };
+        break;
+
+      case 'cleanup_all':
+        result = await handleCleanupAll(params);
+        break;
+
+      case 'upload_file':
+        result = await handleUploadFile(params);
+        break;
+
+      default:
+        console.warn('[Peebo] Unknown native command:', type);
+        result = { success: false, error: `Unknown command: ${type}` };
+    }
+
+    if (id) {
+      sendToNative({ id, ...result });
+    }
+
+  } catch (e) {
+    console.error('[Peebo] Command error:', e);
+    if (id) {
+      sendToNative({ id, success: false, error: e.message });
+    }
+  }
+}
+
+// ============================================
+// Command Implementations
+// ============================================
+
+async function handleAttachActiveTab(params) {
+  try {
+    let tabToUse = null;
+
+    // Check if we already have a controlled tab
+    if (controlledTabId) {
+      try {
+        tabToUse = await chrome.tabs.get(controlledTabId);
+        await chrome.tabs.update(controlledTabId, { active: true });
+        console.log('[Peebo] Reusing existing tab:', controlledTabId);
+      } catch (e) {
+        controlledTabId = null;
+      }
+    }
+
+    // Create new tab if needed
+    if (!tabToUse) {
+      tabToUse = await chrome.tabs.create({ url: 'about:blank', active: true });
+      controlledTabId = tabToUse.id;
+      console.log('[Peebo] Created new tab:', tabToUse.id);
+    }
+
+    primaryTabId = tabToUse.id;
+    return { success: true, tabId: tabToUse.id, url: tabToUse.url };
+
+  } catch (e) {
+    console.error('[Peebo] attach_active_tab failed:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function handleNavigateNative(params) {
+  let url = params?.url;
+
+  if (!url) {
+    return { success: false, error: 'No URL provided' };
+  }
+
+  // Add https:// if missing
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('chrome')) {
+    url = 'https://' + url;
+  }
+
+  console.log('[Peebo] Navigating to:', url);
+
+  if (controlledTabId) {
+    try {
+      await chrome.tabs.update(controlledTabId, { url });
+    } catch (e) {
+      controlledTabId = null;
+    }
+  }
+
+  if (!controlledTabId) {
+    const tab = await chrome.tabs.create({ url, active: true });
+    controlledTabId = tab.id;
+  }
+
+  // Wait for navigation to complete
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  return { success: true, tabId: controlledTabId };
+}
+
+async function handleClickNative(params) {
+  const { x, y, selector, index } = params || {};
+
+  // Coordinate-based click using CDP
+  if (x !== undefined && y !== undefined) {
+    // Mouse move first (triggers hover effects)
+    await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x, y
+    });
+    await new Promise(r => setTimeout(r, 100));
+
+    // Mouse press
+    await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed', x, y, button: 'left', clickCount: 1
+    });
+
+    // Mouse release
+    await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x, y, button: 'left', clickCount: 1
+    });
+
+    await new Promise(r => setTimeout(r, 200));
+    return { success: true };
+  }
+
+  // Selector/index based click via content script
+  if (selector || index !== undefined) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: controlledTabId },
+        files: ['content/form-filler.js']
+      });
+    } catch (e) {
+      // Already injected
+    }
+
+    const response = await chrome.tabs.sendMessage(controlledTabId, {
+      type: 'click_element',
+      params: { selector, index }
+    });
+
+    return response || { success: false, error: 'No response from content script' };
+  }
+
+  return { success: false, error: 'No click target provided' };
+}
+
+async function handleTypeNative(params) {
+  const { text, selector, index } = params || {};
+
+  if (!text) {
+    return { success: false, error: 'No text provided' };
+  }
+
+  // Use content script for typing (better React/Vue compatibility)
+  if (selector || index !== undefined) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: controlledTabId },
+        files: ['content/form-filler.js']
+      });
+    } catch (e) {
+      // Already injected
+    }
+
+    const response = await chrome.tabs.sendMessage(controlledTabId, {
+      type: 'type_text_js',
+      params: { selector, index, text }
+    });
+
+    return response || { success: false, error: 'No response from content script' };
+  }
+
+  // Fallback: CDP typing (for typing into already focused element)
+  await ensureDebuggerAttached(controlledTabId);
+
+  for (const char of text) {
+    await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchKeyEvent', {
+      type: 'keyDown', text: char
+    });
+    await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchKeyEvent', {
+      type: 'keyUp', text: char
+    });
+    // Small delay between characters (human-like)
+    await new Promise(r => setTimeout(r, 50 + Math.random() * 50));
+  }
+
+  return { success: true };
+}
+
+async function handleHoverNative(params) {
+  const { x, y } = params || {};
+
+  if (x !== undefined && y !== undefined) {
+    await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x, y
+    });
+    await new Promise(r => setTimeout(r, 300));
+    return { success: true };
+  }
+
+  return { success: false, error: 'No coordinates provided' };
+}
+
+async function handleExtractDOM(params) {
+  const includeScreenshot = params?.includeScreenshot ?? true;
+
+  try {
+    // Inject content script
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: controlledTabId },
+        files: ['content/form-filler.js']
+      });
+    } catch (e) {
+      // Already injected
+    }
+
+    // Get DOM from content script
+    const domResult = await chrome.tabs.sendMessage(controlledTabId, {
+      type: 'extract_dom_content',
+      params: { includeInteractiveOnly: true }
+    });
+
+    let screenshot = null;
+    if (includeScreenshot) {
+      try {
+        screenshot = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      } catch (e) {
+        console.warn('[Peebo] Screenshot failed:', e);
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        dom: domResult?.data || domResult,
+        screenshot,
+        url: (await chrome.tabs.get(controlledTabId)).url
+      }
+    };
+
+  } catch (e) {
+    console.error('[Peebo] extract_dom failed:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function handleScrollNative(params) {
+  const { direction, amount } = params || {};
+  const scrollAmount = amount || 500;
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: controlledTabId },
+      files: ['content/form-filler.js']
+    });
+  } catch (e) {
+    // Already injected
+  }
+
+  const response = await chrome.tabs.sendMessage(controlledTabId, {
+    type: 'scroll',
+    params: { direction: direction || 'down', amount: scrollAmount }
+  });
+
+  return response || { success: true };
+}
+
+async function handleSendKeysNative(params) {
+  const { keys } = params || {};
+
+  if (!keys) {
+    return { success: false, error: 'No keys provided' };
+  }
+
+  const keyMap = {
+    'enter': { key: 'Enter', code: 'Enter' },
+    'escape': { key: 'Escape', code: 'Escape' },
+    'tab': { key: 'Tab', code: 'Tab' },
+    'backspace': { key: 'Backspace', code: 'Backspace' },
+    'delete': { key: 'Delete', code: 'Delete' },
+    'arrowup': { key: 'ArrowUp', code: 'ArrowUp' },
+    'arrowdown': { key: 'ArrowDown', code: 'ArrowDown' },
+    'arrowleft': { key: 'ArrowLeft', code: 'ArrowLeft' },
+    'arrowright': { key: 'ArrowRight', code: 'ArrowRight' },
+    'space': { key: ' ', code: 'Space' }
+  };
+
+  const keyLower = keys.toLowerCase();
+  const keyInfo = keyMap[keyLower] || { key: keys, code: keys };
+
+  await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: keyInfo.key,
+    code: keyInfo.code
+  });
+
+  await chrome.debugger.sendCommand({ tabId: controlledTabId }, 'Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: keyInfo.key,
+    code: keyInfo.code
+  });
+
+  return { success: true };
+}
+
+async function handleUploadFile(params) {
+  const { selector, filePath } = params || {};
+
+  if (!selector || !filePath) {
+    return { success: false, error: 'Missing selector or filePath' };
+  }
+
+  // File uploads require special handling via CDP
+  await ensureDebuggerAttached(controlledTabId);
+
+  try {
+    // Get the file input element's node ID
+    const { root } = await chrome.debugger.sendCommand(
+      { tabId: controlledTabId },
+      'DOM.getDocument'
+    );
+
+    const { nodeId } = await chrome.debugger.sendCommand(
+      { tabId: controlledTabId },
+      'DOM.querySelector',
+      { nodeId: root.nodeId, selector }
+    );
+
+    if (!nodeId) {
+      return { success: false, error: 'File input element not found' };
+    }
+
+    // Set files on the input
+    await chrome.debugger.sendCommand(
+      { tabId: controlledTabId },
+      'DOM.setFileInputFiles',
+      { nodeId, files: [filePath] }
+    );
+
+    return { success: true };
+  } catch (e) {
+    console.error('[Peebo] File upload failed:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function handleCleanupAll(params) {
+  console.log('[Peebo] Starting cleanup...');
+  const result = {
+    debuggerDetached: false,
+    tabsClosed: 0,
+    errors: []
+  };
+
+  // Detach debugger
+  if (debuggerAttached && debuggerTabId) {
+    try {
+      await chrome.debugger.detach({ tabId: debuggerTabId });
+      result.debuggerDetached = true;
+    } catch (e) {
+      result.errors.push(`Debugger detach: ${e.message}`);
+    }
+    debuggerAttached = false;
+    debuggerTabId = null;
+  }
+
+  // Close app-opened tabs (except primary)
+  for (const tabId of appOpenedTabIds) {
+    if (tabId === primaryTabId || tabId === controlledTabId) continue;
+    try {
+      await chrome.tabs.remove(tabId);
+      result.tabsClosed++;
+    } catch (e) {
+      // Tab may already be closed
+    }
+  }
+  appOpenedTabIds.clear();
+
+  // Reset tab to about:blank
+  if (controlledTabId) {
+    try {
+      await chrome.tabs.update(controlledTabId, { url: 'about:blank' });
+    } catch (e) {
+      result.errors.push(`Tab reset: ${e.message}`);
+    }
+  }
+
+  console.log('[Peebo] Cleanup complete:', result);
+  return { success: true, ...result };
+}
+
+// ============================================
+// Auto-connect to native host on startup
+// ============================================
+
+// Try to connect when a message requests it
+function ensureNativeConnection() {
+  if (!nativePort) {
+    connectNativeHost();
+  }
+  return !!nativePort;
+}
+
 // Initialize
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {

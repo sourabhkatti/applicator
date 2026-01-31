@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Peebo - Job Application Automation",
-  "version": "1.8.0",
+  "version": "1.10.0",
   "description": "Autonomous job applications with ATS-optimized resumes and application tracking",
   "icons": {
     "16": "assets/mascot/peebo-icon-16.png",
@@ -37,6 +37,11 @@
       ],
       "js": ["content/job-detector.js"],
       "css": ["content/job-detector.css"]
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/cookie-dismisser.js"],
+      "run_at": "document_idle"
     }
   ],
   "permissions": [
@@ -44,12 +49,15 @@
     "activeTab",
     "tabs",
     "notifications",
-    "alarms"
+    "alarms",
+    "nativeMessaging",
+    "debugger",
+    "scripting",
+    "cookies",
+    "webNavigation"
   ],
   "host_permissions": [
-    "https://api.browser-use.com/*",
-    "https://api.agentmail.to/*",
-    "https://diplqphbqlomcvlujcxd.supabase.co/*"
+    "<all_urls>"
   ],
   "web_accessible_resources": [
     {
