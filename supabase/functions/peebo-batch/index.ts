@@ -223,6 +223,12 @@ Deno.serve(async (req) => {
       return handleResumeBatch(sessionId, supabase)
     }
 
+    // Verification code lookup for 2FA
+    if (req.method === 'GET' && path.match(/^\/verification-code\/(.+)$/)) {
+      const company = decodeURIComponent(path.split('/verification-code/')[1])
+      return handleGetVerificationCode(company, supabase)
+    }
+
     console.error('[peebo-batch] No route matched for:', req.method, path)
     return jsonResponse({ error: 'Not found', debug: { method: req.method, path } }, 404)
 
@@ -936,10 +942,24 @@ Only when ALL required fields are filled:
    - DO NOT just click submit again
    - Verify all fields, then submit
 
-REPORT:
-- "APPLICATION_SUBMITTED_SUCCESSFULLY" → You see thank you/confirmation page
+## PHASE 5: HANDLE VERIFICATION CODE (if needed)
+
+After submitting, if you see a "verification code", "security code", or "confirm your email" page:
+
+1. A verification code will be sent to ${request.user_info?.email || 'the applicant email'}
+2. Wait 15 seconds for the email to arrive
+3. Fetch the verification code by navigating to this URL in a new tab:
+   ${Deno.env.get('SUPABASE_URL')}/functions/v1/peebo-batch/verification-code/${encodeURIComponent(job.company)}
+4. The response will be JSON like {"code": "ABC123"} or {"code": null}
+5. If code is returned, go back to the verification page, enter the code, and submit
+6. If code is null, wait 10 more seconds and try again (up to 6 attempts total)
+7. If still no code after all attempts, report "VERIFICATION_CODE_TIMEOUT"
+
+FINAL REPORT:
+- "APPLICATION_SUBMITTED_SUCCESSFULLY" → You see thank you/confirmation page after all steps
+- "VERIFICATION_CODE_TIMEOUT" → Could not get verification code after 60 seconds
 - "APPLICATION_FAILED: [specific reason]" → Cannot complete after trying`,
-      max_steps: 50,
+      max_steps: 70,  // Increased to handle 2FA verification flow
       step_timeout: 60,
       use_vision: true
     }
@@ -1233,6 +1253,64 @@ async function handleResumeBatch(
   if (updateError) console.error('[peebo-batch] DB update failed:', updateError)
 
   return jsonResponse({ success: true, message: 'Batch resumed' })
+}
+
+// Get verification code for 2FA
+async function handleGetVerificationCode(
+  company: string,
+  supabase: ReturnType<typeof createClient>
+): Promise<Response> {
+  console.log('[peebo-batch] Looking up verification code for company:', company)
+
+  try {
+    // Find the most recent pending, non-expired code for this company
+    // Use case-insensitive partial match since company names may vary slightly
+    const { data, error } = await supabase
+      .from('peebo_verification_codes')
+      .select('id, code, company, created_at')
+      .ilike('company', `%${company}%`)
+      .eq('status', 'pending')
+      .gte('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (error && error.code !== 'PGRST116') {  // PGRST116 = no rows found
+      console.error('[peebo-batch] Verification code lookup error:', error)
+      return jsonResponse({ error: 'Database error' }, 500)
+    }
+
+    if (!data) {
+      console.log('[peebo-batch] No pending verification code found for:', company)
+      return jsonResponse({ code: null, message: 'No verification code available' })
+    }
+
+    console.log('[peebo-batch] Found verification code for', data.company, ':', data.code)
+
+    // Mark the code as used
+    const { error: updateError } = await supabase
+      .from('peebo_verification_codes')
+      .update({
+        status: 'used',
+        used_at: new Date().toISOString()
+      })
+      .eq('id', data.id)
+
+    if (updateError) {
+      console.error('[peebo-batch] Failed to mark code as used:', updateError)
+      // Still return the code even if marking fails
+    }
+
+    return jsonResponse({
+      code: data.code,
+      company: data.company,
+      retrieved_at: new Date().toISOString()
+    })
+
+  } catch (error) {
+    console.error('[peebo-batch] Verification code error:', error)
+    return jsonResponse({ error: 'Internal server error' }, 500)
+  }
 }
 
 // Format criteria summary for display
