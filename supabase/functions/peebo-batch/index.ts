@@ -880,87 +880,89 @@ async function startJobApplication(
 Before filling ANYTHING:
 1. Click the "Apply" or "Apply for this job" button if needed to open the form
 2. Scroll through the ENTIRE form from top to bottom
-3. Identify ALL required fields - look for:
-   - Fields marked with * (asterisk)
-   - Fields with "required" label
-   - Red highlighting or error styling
-4. Count how many required fields there are
-
-Common required fields on job forms:
-- First Name, Last Name
-- Email, Phone
-- Resume/CV
-- LinkedIn URL
-- Location
-- Work authorization questions
+3. Identify ALL required fields - look for asterisks (*) or "required" labels
+4. Note what type of resume input is available (file upload vs text paste)
 
 ## PHASE 2: FILL ALL REQUIRED FIELDS
 
-Use these EXACT values for each field:
+Use these EXACT values for each field type:
 
 PERSONAL INFO:
 • First Name: ${firstName}
 • Last Name: ${lastName}
-• Full Name (if combined field): ${request.user_info?.name || ''}
+• Full Name (if combined): ${request.user_info?.name || ''}
 • Email: ${request.user_info?.email || ''}
 • Phone: ${request.user_info?.phone || ''}
-• LinkedIn: ${request.user_info?.linkedin || ''}
-• Location/City: San Francisco, CA
+• LinkedIn URL: ${request.user_info?.linkedin || ''}
 
-RESUME/CV:
-- Look for "Enter manually" or "Paste text" option (NOT file upload)
-- If you must paste text, use this resume:
+ADDRESS FIELDS:
+• Current Location / City: San Francisco
+• State: California / CA
+• Country: United States
+• Current Legal Address: 123 Market Street, San Francisco, CA 94105
+• Address Line 1: 123 Market Street
+• Address Line 2: (leave blank)
+• Zip/Postal Code: 94105
+
+RESUME/CV - TRY THESE IN ORDER:
+1. If there's a text box or "paste resume" option, paste this:
 ${resumeText}
+2. If only file upload exists, look for a "skip" or "apply without resume" option
+3. If file upload is mandatory with no alternative, report this in your final output
 
-SCREENING QUESTIONS (common answers):
-• Authorized to work in US? → Yes
-• Require sponsorship? → No
-• How did you hear about us? → LinkedIn or Company website
-• Willing to relocate? → Yes
-• Salary expectations? → Leave blank OR "Competitive"
+WORK AUTHORIZATION (answer ALL variations):
+• Are you legally authorized to work in the United States? → Yes
+• Will you now or in the future require sponsorship? → No
+• Do you now or will you in the future require sponsorship for employment visa status? → No
+• Are you authorized to work in the US for any employer? → Yes
+• Will you require sponsorship to work in the US? → No
+• Current immigration status: US Citizen or Authorized to work
+• Visa sponsorship required: No
+
+OTHER COMMON QUESTIONS:
+• How did you hear about this job/us? → LinkedIn
+• Are you willing to relocate? → Yes
+• Desired/Expected salary: (leave blank if optional, or enter "Open to discussion")
+• Start date / When can you start? → Immediately or 2 weeks
+• Have you worked here before? → No
+• Are you 18 years or older? → Yes
+• Do you have a valid driver's license? → Yes
+• Gender/Race/Veteran/Disability questions → "Decline to self-identify" or skip if optional
 
 Fill EVERY required field. Do NOT skip any field marked with *.
 
 ## PHASE 3: VERIFY BEFORE SUBMIT
 
-STOP before clicking submit. Check:
+STOP before clicking submit:
 1. Scroll through entire form again
-2. Every field with * must have a value
-3. No red error messages visible
-4. No empty required fields
+2. Check every field with * has a value
+3. Look for any red error messages
+4. If Submit button is grayed out, find what's missing
 
-If you see ANY missing required field, fill it NOW before proceeding.
+If ANY required field is empty, fill it NOW.
 
 ## PHASE 4: SUBMIT
 
-Only when ALL required fields are filled:
 1. Click Submit / Send Application / Apply Now button
-2. Wait 3-5 seconds for page response
-3. If error appears about missing fields:
-   - READ the error message
-   - FILL the specific field mentioned
-   - DO NOT just click submit again
-   - Verify all fields, then submit
+2. Wait 3-5 seconds for response
+3. If error about missing fields appears:
+   - Read the specific error
+   - Fill that exact field
+   - Try submit again
 
 ## PHASE 5: HANDLE VERIFICATION CODE (if needed)
 
-After submitting, if you see a "verification code", "security code", or "confirm your email" page:
+If you see a verification code page after submitting:
+1. Wait 15 seconds for email
+2. Navigate to: ${Deno.env.get('SUPABASE_URL')}/functions/v1/peebo-batch/verification-code/${encodeURIComponent(job.company)}
+3. If code returned, enter it and submit
+4. If null, wait 10 seconds and retry (up to 6 times)
 
-1. A verification code will be sent to ${request.user_info?.email || 'the applicant email'}
-2. Wait 15 seconds for the email to arrive
-3. Fetch the verification code by navigating to this URL in a new tab:
-   ${Deno.env.get('SUPABASE_URL')}/functions/v1/peebo-batch/verification-code/${encodeURIComponent(job.company)}
-4. The response will be JSON like {"code": "ABC123"} or {"code": null}
-5. If code is returned, go back to the verification page, enter the code, and submit
-6. If code is null, wait 10 more seconds and try again (up to 6 attempts total)
-7. If still no code after all attempts, report "VERIFICATION_CODE_TIMEOUT"
-
-FINAL REPORT:
-- "APPLICATION_SUBMITTED_SUCCESSFULLY" → You see thank you/confirmation page after all steps
-- "VERIFICATION_CODE_TIMEOUT" → Could not get verification code after 60 seconds
-- "APPLICATION_FAILED: [specific reason]" → Cannot complete after trying`,
-      max_steps: 70,  // Increased to handle 2FA verification flow
-      step_timeout: 60,
+FINAL REPORT (use one of these exact phrases):
+- "APPLICATION_SUBMITTED_SUCCESSFULLY" → You see confirmation/thank you page
+- "APPLICATION_FAILED: [reason]" → Could not submit, explain why
+- "VERIFICATION_CODE_TIMEOUT" → No code received after 60 seconds`,
+      max_steps: 70,
       use_vision: true
     }
 
