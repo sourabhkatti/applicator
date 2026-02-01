@@ -36,11 +36,11 @@ def get_recent_emails(inbox_id: str, since_minutes: int = 10) -> List[Dict]:
     """
     api_key = get_api_key()
 
-    # AgentMail API endpoint - try without the /v1 prefix
-    url = f"https://api.agentmail.to/inboxes/{inbox_id}/messages"
+    # AgentMail API endpoint
+    url = f"https://api.agentmail.to/v0/inboxes/{inbox_id}/threads"
 
     headers = {
-        "X-API-Key": api_key,
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
@@ -58,14 +58,15 @@ def get_recent_emails(inbox_id: str, since_minutes: int = 10) -> List[Dict]:
 
         data = response.json()
 
-        # Transform to simplified format
+        # Transform to simplified format (API returns threads)
         emails = []
-        for msg in data.get('messages', []):
+        for thread in data.get('threads', []):
             emails.append({
-                'sender': msg.get('from', ''),
-                'subject': msg.get('subject', ''),
-                'received_at': msg.get('created_at', ''),
-                'body_preview': msg.get('text', '')[:200]  # First 200 chars
+                'sender': thread.get('last_message_sender', ''),
+                'subject': thread.get('subject', ''),
+                'received_at': thread.get('last_activity', ''),
+                'thread_id': thread.get('thread_id', ''),
+                'participants': thread.get('participants', [])
             })
 
         return emails
@@ -73,6 +74,70 @@ def get_recent_emails(inbox_id: str, since_minutes: int = 10) -> List[Dict]:
     except requests.exceptions.RequestException as e:
         print(f"Warning: Failed to fetch emails from AgentMail: {e}")
         return []
+
+
+def wait_for_confirmation_email(
+    company: str,
+    inbox_id: str = "applicator@agentmail.to",
+    timeout_seconds: int = 120,
+    poll_interval: int = 10
+) -> Optional[Dict]:
+    """
+    Wait for confirmation email after submitting application.
+
+    Args:
+        company: Company name to look for in email
+        inbox_id: AgentMail inbox to check
+        timeout_seconds: Max time to wait for email (default 2 minutes)
+        poll_interval: Seconds between checks (default 10)
+
+    Returns:
+        Email dict if found, None if timeout
+    """
+    import time
+
+    start_time = datetime.utcnow()
+    company_lower = company.lower().replace('-', '').replace('_', '').replace(' ', '')
+
+    print(f"[Email Verification] Waiting for confirmation email from {company}...")
+
+    attempts = 0
+    max_attempts = timeout_seconds // poll_interval
+
+    while attempts < max_attempts:
+        attempts += 1
+        print(f"[Email Verification] Checking inbox... (attempt {attempts}/{max_attempts})")
+
+        # Fetch recent emails (last 5 minutes should cover it)
+        emails = get_recent_emails(inbox_id, since_minutes=5)
+
+        for email in emails:
+            subject_lower = email.get('subject', '').lower()
+            sender = email.get('sender', '').lower()
+
+            # Check if this is a confirmation email for this company
+            # Look for company name in subject or sender, plus confirmation keywords
+            is_company_match = (
+                company_lower in subject_lower.replace('-', '').replace(' ', '') or
+                company_lower in sender.replace('-', '').replace('.', '')
+            )
+
+            is_confirmation = any(kw in subject_lower for kw in [
+                'thank you', 'thanks for', 'application', 'received',
+                'submitted', 'applying', 'confirmation'
+            ])
+
+            if is_company_match and is_confirmation:
+                print(f"[Email Verification] ✓ Confirmation email received!")
+                print(f"    Subject: {email.get('subject', 'N/A')}")
+                return email
+
+        # Wait before next check
+        if attempts < max_attempts:
+            time.sleep(poll_interval)
+
+    print(f"[Email Verification] ✗ No confirmation email received within {timeout_seconds}s")
+    return None
 
 
 def verify_email_received(company: str, submitted_at: str, emails: List[Dict]) -> bool:

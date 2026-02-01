@@ -95,6 +95,17 @@ Only needed if user wants to apply to jobs that require file uploads (Ashby ATS,
 - **Apply to jobs**: Say "apply to 10 jobs" to start autonomous applications
 - **Update preferences**: Edit `applicant.yaml` directly
 
+## Task completion rule
+
+**CRITICAL: You must always complete the original task.**
+
+If the user asks you to run the app for N jobs and:
+- The app fails → fix it and run again
+- A job posting is expired (404) → find another job and try again
+- Any error occurs → resolve it and continue
+
+Repeat this process until the original task is complete. Do NOT stop and ask the user - keep iterating until N successful applications are submitted with email verification confirmed.
+
 ## Primary workflow: Apply to jobs
 
 Operate fully autonomously - no confirmations needed.

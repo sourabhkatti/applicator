@@ -21,12 +21,114 @@ import logging
 import re
 import subprocess
 import sys
+import time
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
+import requests
 import yaml
 from dotenv import load_dotenv
+
+from agentmail_client import wait_for_confirmation_email
+
+
+class VerificationCodeHandler(BaseHTTPRequestHandler):
+    """HTTP handler for fetching verification codes from AgentMail."""
+
+    def log_message(self, format, *args):
+        """Suppress default logging."""
+        pass
+
+    def do_GET(self):
+        """Handle GET request to fetch verification code."""
+        if self.path == '/get-verification-code':
+            try:
+                code = fetch_verification_code_from_agentmail()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(code.encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'text/plain')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(f'ERROR: {str(e)}'.encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+def fetch_verification_code_from_agentmail() -> str:
+    """Fetch the most recent verification code from AgentMail API."""
+    # Get API key from macOS Keychain
+    result = subprocess.run(
+        ['security', 'find-generic-password', '-a', subprocess.getenv('USER') or 'default',
+         '-s', 'agentmail-api-key', '-w'],
+        capture_output=True, text=True, check=True
+    )
+    api_key = result.stdout.strip()
+
+    inbox_id = 'applicator@agentmail.to'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
+    }
+
+    # Wait for email to arrive
+    print('[Verification] Waiting for verification email...')
+    time.sleep(5)
+
+    # Get recent threads
+    url = f'https://api.agentmail.to/v0/inboxes/{inbox_id}/threads'
+    response = requests.get(url, headers=headers, params={'limit': 10}, timeout=30)
+    data = response.json()
+
+    threads = data.get('threads', [])
+
+    # Look for verification email
+    for thread in threads[:5]:
+        subject = thread.get('subject', '').lower()
+        if 'security code' in subject or 'verification' in subject:
+            message_id = thread.get('last_message_id', '')
+
+            # Fetch full message content
+            encoded_message_id = urllib.parse.quote(message_id, safe='')
+            msg_url = f'https://api.agentmail.to/v0/inboxes/{inbox_id}/messages/{encoded_message_id}'
+            msg_response = requests.get(msg_url, headers=headers, timeout=30)
+
+            if msg_response.status_code == 200:
+                msg_data = msg_response.json()
+                html = msg_data.get('html', '')
+
+                # Extract 8-character code from <h1> tag
+                code_match = re.search(r'<h1>([A-Za-z0-9]{8})</h1>', html)
+                if code_match:
+                    code = code_match.group(1)
+                    print(f'[Verification] Found code: {code}')
+                    return code
+
+    raise RuntimeError('Verification code not found in recent emails')
+
+
+def start_verification_server():
+    """Start HTTP server for verification code fetching in background thread."""
+    try:
+        server = HTTPServer(('localhost', 9876), VerificationCodeHandler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        print('[Verification Server] Started on http://localhost:9876')
+        return server
+    except OSError as e:
+        if e.errno == 48:  # Address already in use
+            print('[Verification Server] Already running on http://localhost:9876')
+            return None
+        raise
 
 
 def load_tracker():
@@ -123,7 +225,8 @@ def update_task_progress(task_id: str, current_step: str, progress: int):
 
 
 def complete_task(task_id: str, company: str, role: str, job_url: str, agent_result: str = None,
-                   cost: float = 0.0, input_tokens: int = 0, output_tokens: int = 0):
+                   cost: float = 0.0, input_tokens: int = 0, output_tokens: int = 0,
+                   email_verified: bool = False):
     """
     Remove task from active_tasks and add to jobs list.
     """
@@ -164,7 +267,7 @@ def complete_task(task_id: str, company: str, role: str, job_url: str, agent_res
         "referralContact": None,
         "referralStatus": "none",
         "interviews": [],
-        "notes": f"Applied via browser-applicator on {today}. Awaiting email confirmation.\n\n{agent_result[:200] if agent_result else ''}".strip(),
+        "notes": f"Applied via browser-applicator on {today}. Email {'verified ✓' if email_verified else 'not yet verified'}.\n\n{agent_result[:200] if agent_result else ''}".strip(),
         "companyResearch": None,
         "prepChecklist": {
             "companyResearch": False,
@@ -174,7 +277,7 @@ def complete_task(task_id: str, company: str, role: str, job_url: str, agent_res
         },
         "offer": None,
         "nextAction": "Wait for response",
-        "email_verified": False,
+        "email_verified": email_verified,
         "browser_use_task_id": task_id,
         "application_cost": cost,
         "application_tokens": {
@@ -507,16 +610,7 @@ Upload this file for the resume: {prepared_resume}
 
 1. **Navigate**: Go to {job_url}
 
-2. **EARLY EXIT CHECK - Email Verification Blocker**:
-   - After page loads, check if you see ANY of these:
-     - "Enter security code" or "Verification code"
-     - "Check your email for a code"
-     - "We've sent you a code"
-   - If you see ANY email verification requirement, immediately STOP and report:
-     "FAILURE: This application requires email verification which cannot be completed automatically."
-   - Do NOT attempt to proceed with such applications
-
-3. **Application Tab**: Click "Application" tab if the page shows job description first
+2. **Application Tab**: Click "Application" tab if the page shows job description first
 
 4. **CRITICAL - Scan for ALL required fields FIRST**:
    - Scroll through the ENTIRE form before filling anything
@@ -705,9 +799,40 @@ Upload this file for the resume: {prepared_resume}
     - Scroll to TOP of page to check for error messages
     - Then carefully READ the page content to determine if submission succeeded
 
-    - **IMMEDIATE FAILURE - Email Verification**:
-      - If you see "security code", "verification code", "check your email", or "enter code":
-        → Report "FAILURE: Email verification required" and STOP immediately
+    - **EMAIL VERIFICATION HANDLING**:
+      - If you see "security code", "verification code", "A verification code was sent", or "enter the 8-character code":
+        1. You are on a Greenhouse email verification screen with 8 input boxes
+        2. A verification email has been sent to applicator@agentmail.to
+        3. **CRITICAL: Fetch the verification code using JavaScript**
+
+        Use the evaluate action to fetch the code:
+        ```javascript
+        (async function() {{
+          try {{
+            const response = await fetch('http://localhost:9876/get-verification-code');
+            const code = await response.text();
+
+            if (code.startsWith('ERROR:')) {{
+              return 'FETCH_FAILED: ' + code;
+            }}
+
+            return code;  // Returns the 8-character code
+          }} catch (e) {{
+            return 'FETCH_ERROR: ' + e.message;
+          }}
+        }})();
+        ```
+
+        4. Wait for the evaluation to complete
+        5. The result will be the 8-character verification code (e.g., "AnnYapVT")
+        6. If the result starts with "FETCH_FAILED" or "FETCH_ERROR":
+           - Wait 10 seconds and retry the fetch once
+        7. Once you have the 8-character code, enter it into the security code input fields:
+           - Find the 8 input boxes for the security code
+           - Click on the first input box
+           - Type the entire 8-character code (it should auto-advance through boxes)
+        8. After entering the code, click the Submit button
+        9. Wait 5 seconds and verify success confirmation appears
 
     - **ERROR RESOLUTION - DO NOT SUBMIT AGAIN UNTIL ALL ERRORS FIXED**:
       - If you see error banner like "Your form needs corrections" or any red error messages:
@@ -1014,6 +1139,9 @@ Examples:
 
     args = parser.parse_args()
 
+    # Start verification code server in background
+    start_verification_server()
+
     # Load configuration
     try:
         config = load_config()
@@ -1038,7 +1166,26 @@ Examples:
     result = await apply_to_job(args.url, resume_path, logger, config, json_mode=args.json)
     result["log"] = log_path
 
-    # Add to tracker if successful
+    # Verify confirmation email if submission appeared successful
+    email_verified = False
+    if result.get("success"):
+        logger.info("Submission appears successful. Verifying via confirmation email...")
+        confirmation_email = wait_for_confirmation_email(
+            company=result.get("company", company),
+            inbox_id=config.get("agentmail_inbox_id", "applicator@agentmail.to"),
+            timeout_seconds=120,  # Wait up to 2 minutes
+            poll_interval=10
+        )
+        if confirmation_email:
+            email_verified = True
+            result["email_verified"] = True
+            result["confirmation_email"] = confirmation_email.get("subject", "")
+            logger.info(f"✓ Email verified: {confirmation_email.get('subject', 'N/A')}")
+        else:
+            result["email_verified"] = False
+            logger.warning("✗ No confirmation email received (application may still have succeeded)")
+
+    # Add to tracker if successful (even without email verification)
     if result.get("success"):
         complete_task(
             task_id=result.get("task_id"),
@@ -1048,7 +1195,8 @@ Examples:
             agent_result=result.get("agent_result"),
             cost=result.get("cost", 0.0),
             input_tokens=result.get("input_tokens", 0),
-            output_tokens=result.get("output_tokens", 0)
+            output_tokens=result.get("output_tokens", 0),
+            email_verified=email_verified
         )
 
     # Output result
