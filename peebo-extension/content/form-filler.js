@@ -370,7 +370,7 @@
   // ============================================
 
   function typeTextJS(params) {
-    const { index, selector, text } = params || {};
+    const { index, selector, x, y, text } = params || {};
 
     if (!text) {
       return { success: false, error: 'No text provided' };
@@ -378,15 +378,76 @@
 
     let element = null;
 
+    // Helper to check if element is a valid text input
+    const isTextInput = (el) => {
+      if (!el) return false;
+      if (el.tagName === 'TEXTAREA') return true;
+      if (el.tagName === 'SELECT') return true;
+      if (el.tagName === 'INPUT') {
+        const type = (el.type || 'text').toLowerCase();
+        return !['file', 'hidden', 'submit', 'button', 'image', 'reset'].includes(type);
+      }
+      return false;
+    };
+
     if (index !== undefined) {
       buildElementIndexMap();
       element = elementIndexMap.get(index);
     } else if (selector) {
       element = document.querySelector(selector);
+    } else if (x !== undefined && y !== undefined) {
+      // APPROACH: Click at coordinates to focus, then use document.activeElement
+      // This works better for React/custom components where the actual input
+      // may be hidden or overlaid
+
+      // First, simulate a click at the coordinates to trigger focus
+      const clickTarget = document.elementFromPoint(x, y);
+      if (clickTarget) {
+        // Dispatch click events to trigger React's focus handling
+        clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+        clickTarget.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
+        clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+      }
+
+      // Brief delay for React to process and focus the input
+      // Note: This is synchronous but React typically updates synchronously on click
+
+      // Check if something got focused
+      const focused = document.activeElement;
+      if (isTextInput(focused)) {
+        element = focused;
+      } else {
+        // Fallback: search for nearest visible text input
+        const allInputs = document.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select');
+        let closestDist = Infinity;
+        let closest = null;
+
+        for (const inp of allInputs) {
+          if (!isVisible(inp)) continue;
+          const rect = inp.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const dist = Math.sqrt((cx - x) ** 2 + (cy - y) ** 2);
+          if (dist < closestDist && dist < 150) {
+            closestDist = dist;
+            closest = inp;
+          }
+        }
+
+        if (closest) element = closest;
+      }
     }
 
     if (!element) {
-      return { success: false, error: 'Element not found' };
+      return { success: false, error: `No text input found near (${x}, ${y})` };
+    }
+
+    // Verify we have a valid text input element
+    if (element.tagName === 'INPUT' && element.type === 'file') {
+      return { success: false, error: `Found file input instead of text input at (${x}, ${y})` };
+    }
+    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)) {
+      return { success: false, error: `Found ${element.tagName} instead of input at (${x}, ${y})` };
     }
 
     try {
@@ -398,22 +459,27 @@
       // Focus the element
       element.focus();
 
-      // Clear existing content
-      // Use native value setter to bypass React controlled inputs
-      const descriptor = Object.getOwnPropertyDescriptor(
-        element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
-        'value'
-      );
+      // Clear existing content and set new value
+      // Try native value setter first (bypasses React controlled inputs)
+      let valueSet = false;
+      try {
+        const proto = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
 
-      if (descriptor && descriptor.set) {
-        // Clear first
-        descriptor.set.call(element, '');
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        if (descriptor && descriptor.set) {
+          descriptor.set.call(element, '');
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          descriptor.set.call(element, text);
+          valueSet = true;
+        }
+      } catch (descriptorError) {
+        // Native setter failed, will use fallback
+        console.log('[Peebo] Native setter failed, using fallback:', descriptorError.message);
+      }
 
-        // Then set new value
-        descriptor.set.call(element, text);
-      } else {
-        // Fallback
+      // Fallback: direct value assignment
+      if (!valueSet) {
+        element.value = '';
         element.value = text;
       }
 
@@ -421,17 +487,15 @@
       element.dispatchEvent(new Event('input', { bubbles: true }));
       element.dispatchEvent(new Event('change', { bubbles: true }));
 
-      // Also dispatch keyboard events for good measure
-      for (const char of text) {
-        element.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-        element.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
-        element.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-      }
+      // Also dispatch keyboard events for good measure (but not all chars - too slow)
+      const lastChar = text[text.length - 1] || '';
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: lastChar, bubbles: true }));
+      element.dispatchEvent(new KeyboardEvent('keyup', { key: lastChar, bubbles: true }));
 
       // Blur to trigger validation
       element.dispatchEvent(new Event('blur', { bubbles: true }));
 
-      return { success: true };
+      return { success: true, value: element.value.substring(0, 50) };
     } catch (e) {
       return { success: false, error: e.message };
     }

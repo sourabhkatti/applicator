@@ -366,14 +366,14 @@ async function handleClickNative(params) {
 }
 
 async function handleTypeNative(params) {
-  const { text, selector, index } = params || {};
+  const { text, selector, index, x, y } = params || {};
 
   if (!text) {
     return { success: false, error: 'No text provided' };
   }
 
   // Use content script for typing (better React/Vue compatibility)
-  if (selector || index !== undefined) {
+  if (selector || index !== undefined || (x !== undefined && y !== undefined)) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: controlledTabId },
@@ -385,7 +385,7 @@ async function handleTypeNative(params) {
 
     const response = await chrome.tabs.sendMessage(controlledTabId, {
       type: 'type_text_js',
-      params: { selector, index, text }
+      params: { selector, index, x, y, text }
     });
 
     return response || { success: false, error: 'No response from content script' };
@@ -445,6 +445,11 @@ async function handleExtractDOM(params) {
     let screenshot = null;
     if (includeScreenshot) {
       try {
+        // IMPORTANT: Activate the controlled tab first to ensure captureVisibleTab captures it
+        // This fixes the bug where screenshots captured the wrong tab
+        await chrome.tabs.update(controlledTabId, { active: true });
+        await new Promise(r => setTimeout(r, 150)); // Wait for tab to become visible
+
         screenshot = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
       } catch (e) {
         console.warn('[Peebo] Screenshot failed:', e);
@@ -476,9 +481,11 @@ async function handleExecuteScript(params) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: controlledTabId },
-      func: (code) => {
+      func: async (code) => {
         try {
-          return eval(code);
+          // Await the result in case the code returns a Promise (e.g., async IIFE)
+          const result = eval(code);
+          return result instanceof Promise ? await result : result;
         } catch (e) {
           return { error: e.message };
         }
